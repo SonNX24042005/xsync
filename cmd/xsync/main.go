@@ -219,7 +219,7 @@ func main() {
 		aIdx := tui.PromptMenu("LOI XAC THUC / KET NOI SSH", authOpts, 0)
 		if aIdx == 0 {
 			fmt.Printf("  Nhap mat khau SSH cho '%s': ", selectedProfile)
-			pwdBytes, err := term.ReadPassword(int(syscall.Stdin))
+			pwdBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
 				envVars.SSHPassword = string(pwdBytes)

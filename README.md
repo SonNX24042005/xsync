@@ -4,36 +4,49 @@
 
 ### Tính năng nổi bật:
 - **Đóng gói nhị phân độc lập (Single binary):** Không cần cài đặt môi trường Go hay Python để sử dụng.
+- **Hỗ trợ đa nền tảng:** Chạy mượt mà trên Linux, macOS và Windows (PowerShell, Git Bash, WSL).
 - **Đồng bộ song song (Parallel sync):** Phân luồng nhiều tiến trình `rsync` chạy đồng thời, tối ưu băng thông mạng.
 - **SSH Master Socket:** Tái sử dụng phiên SSH đã xác thực, giảm tối đa độ trễ bắt tay kết nối.
 - **Danh sách trắng (Whitelist):** Lọc chính xác các thư mục/tập tin cần đẩy lên (`xsync.push.ini`) hoặc tải về (`xsync.pull.ini`).
+- **Giao diện điều hướng hiện đại:** Điều hướng bằng phím mũi tên `↑` / `↓` mượt mà qua Bubble Tea.
 - **Live Dashboard:** Theo dõi tiến độ, tốc độ truyền tải của từng luồng theo thời gian thực trên terminal.
 
 ---
 
 ## 1. Yêu cầu hệ thống (Prerequisites)
 
-Hệ thống Linux hoặc macOS cần có sẵn `rsync` và `sshpass`:
-
-```bash
-# Ubuntu / Debian
-sudo apt update && sudo apt install -y rsync sshpass
-
-# macOS (Homebrew)
-brew install rsync esolitos/ipa/sshpass
-```
+*   **Linux (Ubuntu / Debian):**
+    ```bash
+    sudo apt update && sudo apt install -y rsync sshpass
+    ```
+*   **macOS (Homebrew):**
+    ```bash
+    brew install rsync esolitos/ipa/sshpass
+    ```
+*   **Windows:**
+    *   Cài đặt `rsync` qua **Scoop** (Khuyên dùng):
+        ```powershell
+        scoop install rsync
+        ```
+    *   Hoặc sử dụng sẵn bên trong **Git Bash** / **WSL (Windows Subsystem for Linux)**.
 
 ---
 
 ## 2. Cài đặt (Installation)
 
-Chỉ cần chạy một câu lệnh duy nhất dưới đây trên terminal:
-
+### Trên Linux & macOS:
+Chạy một câu lệnh duy nhất dưới đây trên terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.sh | bash
 ```
 
-> **Lưu ý:** Script cài đặt sẽ tự động nhận diện hệ điều hành/kiến trúc CPU, tải bản binary phù hợp vào `~/.local/bin/xsync` và tự cấu hình biến môi trường `PATH`.
+### Trên Windows (PowerShell):
+Mở PowerShell và chạy lệnh:
+```powershell
+irm https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.ps1 | iex
+```
+
+> **Lưu ý:** Script cài đặt sẽ tự động nhận diện hệ điều hành và kiến trúc CPU, tải bản binary phù hợp, lưu vào thư mục hệ thống và tự cấu hình biến môi trường `PATH`.
 
 ---
 
@@ -50,7 +63,7 @@ Host my-server
 ```
 
 ### B. Cấu hình thư mục đồng bộ (`xsync.ini`)
-Tạo file `xsync.ini` tại thư mục làm việc (hoặc sao chép từ `xsync.ini.example`):
+Tự động được tạo mẫu khi gọi lệnh `xsync`, hoặc bạn có thể tự tạo tại thư mục làm việc:
 
 ```ini
 [my-server]
@@ -83,8 +96,14 @@ xsync
 ```
 
 Giao diện tương tác sẽ hướng dẫn bạn từng bước:
-1. **Chọn SSH host:** Chọn máy chủ từ danh sách `~/.ssh/config`.
+1. **Chọn SSH host:** Dùng phím mũi tên `↑` / `↓` chọn máy chủ từ danh sách `~/.ssh/config`.
 2. **Chế độ đồng bộ:** Đẩy dữ liệu (Push) hoặc Tải dữ liệu (Pull).
 3. **Tùy chọn `--delete` (cho Push):** Xóa file thừa trên server nếu không có trong danh sách đẩy.
-4. **Dry-Run (Chạy thử):** Quét và hiển thị trước toàn bộ danh sách file sẽ thay đổi mà không làm ảnh hưởng đến dữ liệu.
-5. **Xác nhận thực thi:** Chạy truyền tải song song đa luồng và hiển thị tiến trình trực quan.
+4. **Dry-Run (Chạy thử):** Quét và hiển thị trước danh sách file thay đổi kèm log chi tiết mà không ảnh hưởng dữ liệu.
+5. **Xác nhận thực thi:** Chạy truyền tải song song đa luồng và hiển thị dashboard trực quan.
+
+---
+
+## 5. Tài liệu kỹ thuật
+
+- [Các trường hợp xử lý ngoại lệ và lỗi trong xsync](docs/xu_ly_ngoai_le_va_loi.md)

@@ -5,24 +5,39 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 	"xsync/internal/tui"
 )
 
 func CheckDependencies() error {
-	if _, err := exec.LookPath("sshpass"); err != nil {
-		tui.PrintErr("Khong tim thay sshpass. Cai dat: sudo apt install sshpass")
-		return fmt.Errorf("missing dependency: sshpass")
-	}
 	if _, err := exec.LookPath("rsync"); err != nil {
-		tui.PrintErr("Khong tim thay rsync. Cai dat: sudo apt install rsync")
+		if runtime.GOOS == "windows" {
+			tui.PrintErr("Khong tim thay rsync. Tren Windows, cai dat qua Scoop: 'scoop install rsync', hoac dung qua Git Bash / WSL.")
+		} else {
+			tui.PrintErr("Khong tim thay rsync. Cai dat: sudo apt install rsync hoac brew install rsync")
+		}
 		return fmt.Errorf("missing dependency: rsync")
+	}
+
+	if _, err := exec.LookPath("sshpass"); err != nil {
+		if runtime.GOOS == "windows" {
+			tui.PrintWarn("Khong tim thay sshpass tren Windows. Khuyen nghi su dung SSH Key (khong can mat khau).")
+		} else {
+			tui.PrintErr("Khong tim thay sshpass. Cai dat: sudo apt install sshpass")
+			return fmt.Errorf("missing dependency: sshpass")
+		}
 	}
 	return nil
 }
 
 func GetSSHControlPath(host string) string {
+	if runtime.GOOS == "windows" {
+		tempDir := os.TempDir()
+		return filepath.ToSlash(filepath.Join(tempDir, fmt.Sprintf("rsync-ctrl-%s", host)))
+	}
 	return fmt.Sprintf("/tmp/rsync-ctrl-%s", host)
 }
 
