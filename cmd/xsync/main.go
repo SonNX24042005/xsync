@@ -42,6 +42,7 @@ func migrateOldConfigs(configDir string) {
 }
 
 func main() {
+	// 1. Kiem tra phu thuoc he thong (Fatal Error neu thieu)
 	if err := sync.CheckDependencies(); err != nil {
 		os.Exit(1)
 	}
@@ -54,24 +55,31 @@ func main() {
 
 	migrateOldConfigs(configDir)
 
-	createdConfigs := config.EnsureConfigFiles(configDir)
-	for _, f := range createdConfigs {
-		tui.PrintOk(fmt.Sprintf("Da tu dong tao file cau hinh: %s", f))
+	envFilePath := filepath.Join(configDir, "xsync.ini")
+	if !fileExists(envFilePath) {
+		nearest := config.FindConfigNearest("xsync.ini", 8)
+		if nearest != "" {
+			envFilePath = filepath.Join(nearest, "xsync.ini")
+		}
 	}
 
-	envDir := config.FindConfigNearest("xsync.ini", 8)
-	pushDir := config.FindConfigNearest("xsync.push.ini", 8)
-	pullDir := config.FindConfigNearest("xsync.pull.ini", 8)
-
-	envFilePath := filepath.Join(configDir, "xsync.ini")
-	if envDir != "" {
-		envFilePath = filepath.Join(envDir, "xsync.ini")
+	// 2. Tu dong tao xsync.ini neu chua ton tai va mo editor cho nguoi dung nhap
+	if !fileExists(envFilePath) {
+		tui.PrintWarn("Chua tim thay file xsync.ini tai thu muc hien tai.")
+		_ = config.EnsureConfigFiles(configDir)
+		envFilePath = filepath.Join(configDir, "xsync.ini")
+		tui.PrintOk("Da tu dong tao file mau xsync.ini tai thu muc hien tai.")
+		tui.PrintInfo("Chuan bi mo xsync.ini trong trinh soan thao de ban khai bao SSH Host va REMOTE_DIR...")
+		fmt.Print("  An Enter de mo file cau hinh...")
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		_ = tui.OpenFileInEditor(envFilePath)
 	}
 
 	var selectedProfile string
 	var envVars config.Profile
 	envFromTUI := false
 
+	// 3. Chon SSH Profile tu ~/.ssh/config (co xu ly Fatal Error neu chua co host)
 	for {
 		hosts := config.ParseSSHHosts()
 		if len(hosts) == 0 {
@@ -85,7 +93,7 @@ func main() {
 			_ = os.MkdirAll(filepath.Dir(sshConfigPath), 0o700)
 			if _, err := os.Stat(sshConfigPath); os.IsNotExist(err) {
 				template := `# Vi du cau hinh SSH Host trong ~/.ssh/config
-# Host server1
+# Host my-server
 #     HostName 192.168.1.100
 #     Port 22
 #     User root
@@ -93,6 +101,18 @@ func main() {
 				_ = os.WriteFile(sshConfigPath, []byte(template), 0o600)
 			}
 			_ = tui.OpenFileInEditor(sshConfigPath)
+
+			// Kiem tra lai sau khi sua
+			if len(config.ParseSSHHosts()) == 0 {
+				retryOpts := []string{
+					"Mo lai file ~/.ssh/config de them Host",
+					"Dung lai",
+				}
+				cIdx := tui.PromptMenu("CHUA CO SSH HOST", retryOpts, 0)
+				if cIdx == 1 {
+					os.Exit(0)
+				}
+			}
 			continue
 		}
 
@@ -134,61 +154,46 @@ func main() {
 		}
 	}
 
+	// 4. Kiem tra va bat buoc nhap REMOTE_DIR trong xsync.ini neu chua co
 	for {
 		profiles, _ := config.LoadProfiles(envFilePath)
-		if p, exists := profiles[selectedProfile]; exists && p.RemoteDir != "" {
+		if p, exists := profiles[selectedProfile]; exists && strings.TrimSpace(p.RemoteDir) != "" && p.RemoteDir != "/path/to/remote/dir" {
 			envVars = p
 			break
 		}
 
-		tui.PrintWarn(fmt.Sprintf("Host '%s' chua duoc cau hinh thu muc REMOTE_DIR trong xsync.ini.", selectedProfile))
-		tui.PrintInfo("Chuan bi mo file xsync.ini de ban tu khai bao...")
-		fmt.Print("  An Enter de mo file cau hinh...")
-		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-
-		if _, exists := profiles[selectedProfile]; !exists {
-			_ = config.SaveProfile(envFilePath, selectedProfile, config.Profile{
-				SSHPassword: "",
-				RemoteDir:   "/path/to/remote/dir",
-			})
+		tui.PrintWarn(fmt.Sprintf("Host '%s' chua duoc khai bao thu muc REMOTE_DIR hop le trong xsync.ini.", selectedProfile))
+		fixOpts := []string{
+			"Mo file xsync.ini trong trinh soan thao de dien REMOTE_DIR",
+			"Chon lai SSH Host khac",
+			"Dung lai",
 		}
-		_ = tui.OpenFileInEditor(envFilePath)
+		fIdx := tui.PromptMenu("CAU HINH THIEU REMOTE_DIR", fixOpts, 0)
+		if fIdx == 0 {
+			if _, exists := profiles[selectedProfile]; !exists {
+				_ = config.SaveProfile(envFilePath, selectedProfile, config.Profile{
+					SSHPassword: "",
+					RemoteDir:   "/path/to/remote/dir",
+				})
+			}
+			_ = tui.OpenFileInEditor(envFilePath)
+		} else if fIdx == 1 {
+			// Restart profile choice
+			return
+		} else {
+			os.Exit(0)
+		}
 	}
 
-	if envVars.SSHPassword == "" {
-		fmt.Printf("  Nhap mat khau SSH cho '%s' (de trong neu dung SSH key): ", selectedProfile)
-		pwdBytes, err := term.ReadPassword(int(syscall.Stdin))
-		fmt.Println()
-		if err == nil && len(pwdBytes) > 0 {
-			envVars.SSHPassword = string(pwdBytes)
-			envFromTUI = true
-		}
-	}
-
-	pushFromTUI := false
-	pullFromTUI := false
-	var pushIncludeTmp string
-	var pullIncludeTmp string
-	var generatedFilterFile string
-
+	// 5. Thiet lap va kiem tra ket noi SSH Master Socket (Co vong lap thu lai neu sai password)
+	controlPath := sync.GetSSHControlPath(selectedProfile)
 	cleanup := func() {
-		if generatedFilterFile != "" {
-			_ = os.Remove(generatedFilterFile)
-		}
-		if pushIncludeTmp != "" {
-			_ = os.Remove(pushIncludeTmp)
-		}
-		if pullIncludeTmp != "" {
-			_ = os.Remove(pullIncludeTmp)
-		}
 		if selectedProfile != "" {
-			controlPath := sync.GetSSHControlPath(selectedProfile)
 			sync.CleanupSSHMaster(selectedProfile, controlPath)
 		}
 	}
 	defer cleanup()
 
-	// Handle interrupt signal for safe cleanup
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
@@ -197,16 +202,41 @@ func main() {
 		os.Exit(130)
 	}()
 
-	controlPath := sync.GetSSHControlPath(selectedProfile)
-	tui.PrintInfo(fmt.Sprintf("Dang thiet lap ket noi SSH Master cho host '%s'...", selectedProfile))
-	ok, errSSH := sync.SetupSSHMaster(selectedProfile, envVars.SSHPassword, controlPath)
-	if !ok {
-		tui.PrintErr(fmt.Sprintf("Khong the xac thuc SSH: %s", errSSH))
-		os.Exit(1)
-	}
-	tui.PrintOk("Da thiet lap SSH Master thanh cong!")
+	for {
+		tui.PrintInfo(fmt.Sprintf("Dang thiet lap ket noi SSH Master cho host '%s'...", selectedProfile))
+		ok, errSSH := sync.SetupSSHMaster(selectedProfile, envVars.SSHPassword, controlPath)
+		if ok {
+			tui.PrintOk("Da thiet lap SSH Master thanh cong!")
+			break
+		}
 
-	// Delete file with identical name on remote to prevent collision
+		tui.PrintErr(fmt.Sprintf("Khong the ket noi SSH toi host '%s': %s", selectedProfile, errSSH))
+		authOpts := []string{
+			"Nhap mat khau SSH bang tay de thu lai",
+			"Mo file xsync.ini de kiem tra va sua lai cau hinh",
+			"Dung lai",
+		}
+		aIdx := tui.PromptMenu("LOI XAC THUC / KET NOI SSH", authOpts, 0)
+		if aIdx == 0 {
+			fmt.Printf("  Nhap mat khau SSH cho '%s': ", selectedProfile)
+			pwdBytes, err := term.ReadPassword(int(syscall.Stdin))
+			fmt.Println()
+			if err == nil {
+				envVars.SSHPassword = string(pwdBytes)
+				envFromTUI = true
+			}
+		} else if aIdx == 1 {
+			_ = tui.OpenFileInEditor(envFilePath)
+			profiles, _ := config.LoadProfiles(envFilePath)
+			if p, exists := profiles[selectedProfile]; exists {
+				envVars = p
+			}
+		} else {
+			os.Exit(1)
+		}
+	}
+
+	// Tu dong xoa file trung ten tren remote neu co
 	if rpath := strings.TrimRight(envVars.RemoteDir, "/"); rpath != "" {
 		checkArgs := []string{
 			"-o", "ControlMaster=auto",
@@ -225,12 +255,13 @@ func main() {
 		_ = checkCmd.Run()
 	}
 
+	// 6. Menu lua chon che do dong bo
 	modes := []string{
 		"Day du lieu tu may len server  (PUSH)",
 		"Tai du lieu tu server ve may   (PULL)",
 		"Dung lai",
 	}
-	modeIdx := tui.PromptMenu("CHON CHE DO DONG BO", modes, -1)
+	modeIdx := tui.PromptMenu("CHON CHE DO DONG BO", modes, 0)
 	if modeIdx == 2 {
 		os.Exit(0)
 	}
@@ -267,69 +298,72 @@ func main() {
 		destPath = configDir
 	}
 
-	includeFilePush := ""
-	if pushDir != "" {
-		includeFilePush = filepath.Join(pushDir, "xsync.push.ini")
+	// 7. Quan ly Whitelist File (Tu dong tao va mo editor neu chua co)
+	whitelistFileName := "xsync.push.ini"
+	if syncMode == "pull" {
+		whitelistFileName = "xsync.pull.ini"
 	}
-	includeFilePull := ""
-	if pullDir != "" {
-		includeFilePull = filepath.Join(pullDir, "xsync.pull.ini")
+	whitelistFilePath := filepath.Join(configDir, whitelistFileName)
+
+	if !fileExists(whitelistFilePath) {
+		tui.PrintWarn(fmt.Sprintf("Chua tim thay %s tai thu muc hien tai.", whitelistFileName))
+		_ = config.EnsureConfigFiles(configDir)
+		tui.PrintOk(fmt.Sprintf("Da tu dong tao file mau %s.", whitelistFileName))
+		tui.PrintInfo(fmt.Sprintf("Chuan bi mo %s trong trinh soan thao de ban nhap danh sach...", whitelistFileName))
+		fmt.Print("  An Enter de mo file...")
+		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
+		_ = tui.OpenFileInEditor(whitelistFilePath)
 	}
 
-	createTemplate := func(mode, localVal, remoteVal string) string {
-		baseHint := localVal
-		if mode == "pull" {
-			baseHint = remoteVal
+	var generatedFilterFile string
+	defer func() {
+		if generatedFilterFile != "" {
+			_ = os.Remove(generatedFilterFile)
 		}
-		return fmt.Sprintf(`# Duong dan tuong doi so voi: %s
-# Thu muc ket bang /    Vi du:  mlops/datasets/
-# File khong co /       Vi du:  upload_run.py
-# Keo tha file/folder vao day: path tuyet doi se tu dong chuyen thanh tuong doi
+	}()
 
-`, baseHint)
-	}
-
-	if syncMode == "push" {
-		if includeFilePush == "" || !fileExists(includeFilePush) {
-			tui.PrintWarn("Khong tim thay xsync.push.ini.")
-			tui.PrintInfo("Hien giao dien nhap danh sach push...")
-			tpl := createTemplate("push", configDir, envVars.RemoteDir)
-			rawText, _ := tui.EditTextInEditor(tpl, "_push_whitelist")
-
-			lines := strings.Split(rawText, "\n")
-			processed := pathutils.ProcessIncludePaths(lines, "push", configDir, envVars.RemoteDir)
-
-			tmpF, err := os.CreateTemp("", "*_push_inc")
-			if err == nil {
-				_, _ = tmpF.WriteString(strings.Join(processed, "\n") + "\n")
-				tmpF.Close()
-				pushIncludeTmp = tmpF.Name()
-				includeFilePush = pushIncludeTmp
-				pushFromTUI = true
-			}
-		} else {
-			tui.PrintInfo(fmt.Sprintf("Dung xsync.push.ini tai: %s", pushDir))
+	for {
+		data, err := os.ReadFile(whitelistFilePath)
+		if err != nil {
+			tui.PrintWarn(fmt.Sprintf("Khong the doc file %s. Se dong bo toan bo thu muc.", whitelistFileName))
+			break
 		}
-	} else {
-		if includeFilePull == "" || !fileExists(includeFilePull) {
-			tui.PrintWarn("Khong tim thay xsync.pull.ini.")
-			tui.PrintInfo("Hien giao dien nhap danh sach pull...")
-			tpl := createTemplate("pull", configDir, envVars.RemoteDir)
-			rawText, _ := tui.EditTextInEditor(tpl, "_pull_whitelist")
 
-			lines := strings.Split(rawText, "\n")
-			processed := pathutils.ProcessIncludePaths(lines, "pull", configDir, envVars.RemoteDir)
+		lines := strings.Split(string(data), "\n")
+		// Xử lý và kiểm tra tính hợp lệ của đường dẫn (Cảnh báo non-fatal nếu đường dẫn local không tồn tại)
+		processRes := pathutils.ProcessIncludePathsWithValidation(lines, syncMode, configDir, envVars.RemoteDir)
 
-			tmpF, err := os.CreateTemp("", "*_pull_inc")
+		for _, w := range processRes.Warnings {
+			tui.PrintWarn(w)
+		}
+
+		rules := pathutils.BuildIncludeFilter(processRes.ValidPaths)
+		if len(rules) > 0 {
+			tmpF, err := os.CreateTemp("", "*_rsync_filter")
 			if err == nil {
-				_, _ = tmpF.WriteString(strings.Join(processed, "\n") + "\n")
+				_, _ = tmpF.WriteString(strings.Join(rules, "\n") + "\n")
 				tmpF.Close()
-				pullIncludeTmp = tmpF.Name()
-				includeFilePull = pullIncludeTmp
-				pullFromTUI = true
+				generatedFilterFile = tmpF.Name()
+				tui.PrintOk(fmt.Sprintf("Da ap dung whitelist %s (%d quy tac)", syncMode, len(processRes.ValidPaths)))
 			}
+			break
 		} else {
-			tui.PrintInfo(fmt.Sprintf("Dung xsync.pull.ini tai: %s", pullDir))
+			tui.PrintWarn(fmt.Sprintf("Whitelist %s khong co muc hop le nao.", syncMode))
+			emptyOpts := []string{
+				"Tiep tuc dong bo TOAN BO thu muc",
+				fmt.Sprintf("Mo lai file %s de nhap danh sach", whitelistFileName),
+				"Dung lai",
+			}
+			eIdx := tui.PromptMenu("WHITELIST TRONG", emptyOpts, 0)
+			if eIdx == 0 {
+				tui.PrintInfo(fmt.Sprintf("Che do: %s TOAN BO thu muc.", strings.ToUpper(syncMode)))
+				break
+			} else if eIdx == 1 {
+				_ = tui.OpenFileInEditor(whitelistFilePath)
+				continue
+			} else {
+				os.Exit(0)
+			}
 		}
 	}
 
@@ -339,42 +373,15 @@ func main() {
 	tui.PrintKV("SSH Host", selectedProfile)
 	tui.PrintKV("Config dir", configDir)
 
-	activeWhitelistFile := includeFilePush
-	if syncMode == "pull" {
-		activeWhitelistFile = includeFilePull
-	}
-
-	if activeWhitelistFile != "" && fileExists(activeWhitelistFile) {
-		data, err := os.ReadFile(activeWhitelistFile)
-		if err == nil {
-			lines := strings.Split(string(data), "\n")
-			cleanedLines := pathutils.ProcessIncludePaths(lines, syncMode, configDir, envVars.RemoteDir)
-			rules := pathutils.BuildIncludeFilter(cleanedLines)
-			if len(rules) > 0 {
-				tmpF, err := os.CreateTemp("", "*_rsync_filter")
-				if err == nil {
-					_, _ = tmpF.WriteString(strings.Join(rules, "\n") + "\n")
-					tmpF.Close()
-					generatedFilterFile = tmpF.Name()
-					tui.PrintOk(fmt.Sprintf("Da ap dung whitelist %s", syncMode))
-				}
-			} else {
-				tui.PrintWarn(fmt.Sprintf("Whitelist %s khong co entry hop le — %s TOAN BO thu muc.", syncMode, syncMode))
-			}
-		}
-	} else {
-		tui.PrintWarn(fmt.Sprintf("Khong co whitelist %s — %s TOAN BO thu muc.", syncMode, syncMode))
-	}
-
-	// 5. Run Dry-run
+	// 8. Chay Thu (Dry-Run)
 	tui.PrintHeader("DANG CHAY THU (DRY-RUN)")
 	dryOk := sync.RunDryRun(syncMode, configDir, selectedProfile, envVars.RemoteDir, generatedFilterFile, deleteEnabled)
 	if !dryOk {
-		tui.PrintErr("Dry-run that bai. Kiem tra SSH, quyen truy cap, duong dan remote va port.")
+		tui.PrintErr("Dry-run that bai. Vui long kiem tra SSH, quyen truy cap va duong dan remote.")
 		os.Exit(1)
 	}
 
-	// 6. Confirm execution
+	// 9. Xac nhan thuc thi
 	confirmOpts := []string{
 		"Tiep tuc (chay THAT)",
 		"Dung lai",
@@ -384,7 +391,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	// 7. Execute parallel sync
+	// 10. Chay truyen tai song song
 	tui.PrintHeader(actionStart)
 	syncOk := parallel.RunParallelSync(
 		syncMode,
@@ -400,35 +407,16 @@ func main() {
 		tui.PrintOk(actionDone)
 		fmt.Println()
 
-		if envFromTUI || pushFromTUI || pullFromTUI {
-			var saveItems []tui.ChecklistItem
-			if envFromTUI {
-				saveItems = append(saveItems, tui.ChecklistItem{Key: "env", Label: "Luu xsync.ini (SSH credentials + duong dan)", Checked: true})
+		if envFromTUI {
+			saveItems := []tui.ChecklistItem{
+				{Key: "env", Label: "Luu mat khau SSH vua nhap vao xsync.ini", Checked: true},
 			}
-			if pushFromTUI {
-				saveItems = append(saveItems, tui.ChecklistItem{Key: "push", Label: "Luu xsync.push.ini (danh sach files push)", Checked: true})
-			}
-			if pullFromTUI {
-				saveItems = append(saveItems, tui.ChecklistItem{Key: "pull", Label: "Luu xsync.pull.ini (danh sach files pull)", Checked: true})
-			}
-
-			selectedSaves := tui.PromptChecklist("LUU CAU HINH", saveItems)
-			saveSet := make(map[string]bool)
+			selectedSaves := tui.PromptChecklist("LUU MAT KHAU", saveItems)
 			for _, s := range selectedSaves {
-				saveSet[s] = true
-			}
-
-			if saveSet["env"] {
-				_ = config.SaveProfile(envFilePath, selectedProfile, envVars)
-				tui.PrintOk(fmt.Sprintf("Da luu profile '%s' vao xsync.ini", selectedProfile))
-			}
-			if saveSet["push"] && pushIncludeTmp != "" && fileExists(pushIncludeTmp) {
-				copyFile(pushIncludeTmp, filepath.Join(configDir, "xsync.push.ini"))
-				tui.PrintOk("Da luu: xsync.push.ini")
-			}
-			if saveSet["pull"] && pullIncludeTmp != "" && fileExists(pullIncludeTmp) {
-				copyFile(pullIncludeTmp, filepath.Join(configDir, "xsync.pull.ini"))
-				tui.PrintOk("Da luu: xsync.pull.ini")
+				if s == "env" {
+					_ = config.SaveProfile(envFilePath, selectedProfile, envVars)
+					tui.PrintOk(fmt.Sprintf("Da luu mat khau cho profile '%s' vao xsync.ini", selectedProfile))
+				}
 			}
 		}
 		os.Exit(0)
@@ -441,11 +429,4 @@ func main() {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
-}
-
-func copyFile(src, dst string) {
-	data, err := os.ReadFile(src)
-	if err == nil {
-		_ = os.WriteFile(dst, data, 0o644)
-	}
 }

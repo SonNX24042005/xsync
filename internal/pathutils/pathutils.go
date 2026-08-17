@@ -1,15 +1,29 @@
 package pathutils
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
+// ProcessResult holds valid processed relative paths and non-fatal path warnings.
+type ProcessResult struct {
+	ValidPaths []string
+	Warnings   []string
+}
+
 // ProcessIncludePaths cleans paths: strips absolute prefixes matching either localDir or remoteDir,
 // removes comments, and appends a trailing slash for directories in push mode.
 func ProcessIncludePaths(rawLines []string, mode, localDir, remoteDir string) []string {
-	var processed []string
+	res := ProcessIncludePathsWithValidation(rawLines, mode, localDir, remoteDir)
+	return res.ValidPaths
+}
+
+// ProcessIncludePathsWithValidation cleans paths, validates existence in push mode,
+// collects non-fatal warnings for invalid paths, and returns only valid relative paths.
+func ProcessIncludePathsWithValidation(rawLines []string, mode, localDir, remoteDir string) ProcessResult {
+	var result ProcessResult
 
 	cleanLocal := ""
 	if localDir != "" {
@@ -57,23 +71,32 @@ func ProcessIncludePaths(rawLines []string, mode, localDir, remoteDir string) []
 
 		// Clean leading slashes
 		rel = strings.TrimLeft(rel, "/\\")
+		if rel == "" {
+			continue
+		}
 
-		// If it is a directory locally and does not end with /, append / in push mode
+		// Validate local existence in push mode
 		if mode == "push" && cleanLocal != "" {
 			fullPath := filepath.Join(cleanLocal, rel)
-			if info, err := os.Stat(fullPath); err == nil && info.IsDir() {
+			info, err := os.Stat(fullPath)
+			if os.IsNotExist(err) {
+				// Path does not exist locally -> warn and skip
+				result.Warnings = append(result.Warnings, fmt.Sprintf("Duong dan '%s' khong ton tai o Local, tu dong bo qua.", rel))
+				continue
+			}
+
+			// If it is a directory locally and does not end with /, append /
+			if err == nil && info.IsDir() {
 				if !strings.HasSuffix(rel, "/") {
 					rel = rel + "/"
 				}
 			}
 		}
 
-		if rel != "" {
-			processed = append(processed, rel)
-		}
+		result.ValidPaths = append(result.ValidPaths, rel)
 	}
 
-	return processed
+	return result
 }
 
 // BuildIncludeFilter constructs an rsync merge filter list from whitelist paths.

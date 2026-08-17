@@ -1,6 +1,7 @@
 package pathutils
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -71,3 +72,22 @@ func TestBuildIncludeFilter(t *testing.T) {
 		t.Errorf("rules missing expected entries: %v", rules)
 	}
 }
+
+func TestProcessIncludePathsWithValidation(t *testing.T) {
+	raw := []string{
+		"non_existent_folder_xyz_123/",
+		"pathutils.go",
+	}
+
+	pwd, _ := os.Getwd()
+	res := ProcessIncludePathsWithValidation(raw, "push", pwd, "/remote/path")
+
+	if len(res.Warnings) != 1 {
+		t.Errorf("expected 1 warning for non-existent path, got %d: %v", len(res.Warnings), res.Warnings)
+	}
+
+	if len(res.ValidPaths) != 1 || res.ValidPaths[0] != "pathutils.go" {
+		t.Errorf("expected valid paths to contain only 'pathutils.go', got %v", res.ValidPaths)
+	}
+}
+
