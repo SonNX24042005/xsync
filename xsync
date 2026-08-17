@@ -1,0 +1,481 @@
+#!/usr/bin/env python3
+import os
+import sys
+import tempfile
+import shutil
+import atexit
+import subprocess
+
+# 1. Resolve path for xsync_core import
+script_dir = os.path.dirname(os.path.realpath(__file__))
+if os.path.exists(os.path.join(script_dir, "xsync_core")):
+    sys.path.insert(0, script_dir)
+else:
+    install_dir = os.path.expanduser("~/.local/share/xsync")
+    if os.path.exists(os.path.join(install_dir, "xsync_core")):
+        sys.path.insert(0, install_dir)
+    else:
+        print("\033[31m[ERR]  Khong tim thay xsync_core. Vui long kiem tra lai thu muc cai dat.\033[0m")
+        sys.exit(1)
+
+from xsync_core.tui import (
+    print_header, print_info, print_ok, print_warn, print_err, print_kv,
+    prompt_menu, prompt_checklist, edit_text_in_editor, open_file_in_editor
+)
+from xsync_core.config import find_config_nearest, load_profiles, save_profile, parse_ssh_hosts, get_default_profile, set_default_profile
+from xsync_core.path_utils import process_include_paths, build_include_filter
+from xsync_core.sync import check_dependencies, get_ssh_control_path, setup_ssh_master, cleanup_ssh_master, run_dry_run
+from xsync_core.parallel import run_parallel_sync
+
+# ==========================================
+# CAI DAT / CAP NHAT TU DONG
+# ==========================================
+def handle_installation():
+    target_install_dir = os.path.expanduser("~/.local/share/xsync")
+    if os.path.realpath(__file__) != os.path.realpath(os.path.join(target_install_dir, "xsync")):
+        if not os.path.exists(os.path.join(target_install_dir, "xsync")):
+            # Full install prompt
+            install_self()
+        else:
+            # Silent update
+            try:
+                shutil.copy2(os.path.realpath(__file__), os.path.join(target_install_dir, "xsync"))
+                os.chmod(os.path.join(target_install_dir, "xsync"), 0o755)
+                core_src = os.path.join(os.path.dirname(os.path.realpath(__file__)), "xsync_core")
+                core_dest = os.path.join(target_install_dir, "xsync_core")
+                if os.path.exists(core_dest):
+                    shutil.rmtree(core_dest)
+                shutil.copytree(core_src, core_dest)
+                print_info(f"Da cap nhat xsync tai {target_install_dir}")
+            except Exception as e:
+                print_warn(f"Khong the tu dong cap nhat: {e}")
+
+def install_self():
+    install_dir = os.path.expanduser("~/.local/share/xsync")
+    bin_dir = os.path.expanduser("~/.local/bin")
+    
+    print_header("XSYNC — CAI DAT LAN DAU")
+    print_info(f"Script se duoc cai vao : {install_dir}")
+    print_info(f"Lenh 'xsync' se co tai : {bin_dir}/xsync")
+    
+    try:
+        confirm = input("  Ban co muon cai dat khong? (y/N): ").strip()
+    except KeyboardInterrupt:
+        print("")
+        return
+        
+    if confirm.lower() != 'y':
+        print_info("Bo qua cai dat. Tiep tuc chay truc tiep.\n")
+        return
+        
+    try:
+        os.makedirs(install_dir, exist_ok=True)
+        os.makedirs(bin_dir, exist_ok=True)
+        
+        # Copy xsync executable
+        shutil.copy2(os.path.realpath(__file__), os.path.join(install_dir, "xsync"))
+        os.chmod(os.path.join(install_dir, "xsync"), 0o755)
+        
+        # Copy xsync_core folder
+        core_src = os.path.join(os.path.dirname(os.path.realpath(__file__)), "xsync_core")
+        core_dest = os.path.join(install_dir, "xsync_core")
+        if os.path.exists(core_dest):
+            shutil.rmtree(core_dest)
+        shutil.copytree(core_src, core_dest)
+        
+        # Create symlink
+        bin_xsync = os.path.join(bin_dir, "xsync")
+        if os.path.exists(bin_xsync) or os.path.islink(bin_xsync):
+            os.remove(bin_xsync)
+        os.symlink(os.path.join(install_dir, "xsync"), bin_xsync)
+        
+        print_ok("Cai dat file thuc thi va thu vien hoan tat!")
+        
+        # Detect shell profile to add PATH
+        shell_name = os.path.basename(os.environ.get("SHELL", "bash"))
+        rc_files = []
+        if shell_name == "bash":
+            rc_files.append(os.path.expanduser("~/.bashrc"))
+        elif shell_name == "zsh":
+            rc_files.append(os.path.expanduser("~/.zshrc"))
+        elif shell_name == "fish":
+            rc_files.append(os.path.expanduser("~/.config/fish/config.fish"))
+        else:
+            rc_files.append(os.path.expanduser("~/.profile"))
+            
+        if os.path.expanduser("~/.profile") not in rc_files:
+            rc_files.append(os.path.expanduser("~/.profile"))
+            
+        path_line = f'export PATH="$PATH:{bin_dir}"'
+        for rc in rc_files:
+            if os.path.exists(rc):
+                has_bin = False
+                with open(rc, 'r', encoding='utf-8') as f:
+                    if bin_dir in f.read():
+                        has_bin = True
+                if not has_bin:
+                    with open(rc, 'a', encoding='utf-8') as f:
+                        f.write(f"\n# Added by xsync installer\n{path_line}\n")
+                    print_ok(f"Da them {bin_dir} vao PATH trong {rc}")
+                else:
+                    print_info(f"{bin_dir} da co trong {rc}")
+                    
+        if bin_dir in os.environ.get("PATH", ""):
+            print_ok("Lenh 'xsync' san sang! Goi tu bat ky thu muc nao.")
+        else:
+            print_warn("Mo terminal moi (hoac chay lenh duoi) de dung 'xsync' ngay:")
+            print(f"    export PATH=\"$PATH:{bin_dir}\"")
+        print_ok("Cai dat hoan tat!\n")
+    except Exception as e:
+        print_err(f"Loi trong qua trinh cai dat: {e}")
+
+# ==========================================
+# MAIN WORKFLOW
+# ==========================================
+def main():
+    handle_installation()
+    check_dependencies()
+    
+    # 1. Tim va doc file cau hinh
+    config_dir = os.getcwd()
+    # Di tru tu ten file cu (tat ca cac phien ban) sang ten file moi nhat
+    for old_name, new_name in [
+        (".env_rsync", "xsync.ini"),
+        (".rsyncinclude.push", "xsync.push.ini"),
+        ("xsync.push", "xsync.push.ini"),
+        (".rsyncinclude.pull", "xsync.pull.ini"),
+        ("xsync.pull", "xsync.pull.ini"),
+    ]:
+        old_path = os.path.join(config_dir, old_name)
+        new_path = os.path.join(config_dir, new_name)
+        if os.path.exists(old_path) and not os.path.exists(new_path):
+            try:
+                shutil.move(old_path, new_path)
+                print_info(f"Da tu dong di tru {old_name} sang {new_name}")
+            except Exception:
+                pass
+
+    env_dir = find_config_nearest("xsync.ini")
+    push_dir = find_config_nearest("xsync.push.ini")
+    pull_dir = find_config_nearest("xsync.pull.ini")
+    
+    env_file_path = os.path.join(env_dir, "xsync.ini") if env_dir else os.path.join(config_dir, "xsync.ini")
+    
+    selected_profile = None
+    env_vars = {}
+    env_from_tui = False
+    
+    while True:
+        hosts = parse_ssh_hosts()
+        if not hosts:
+            print_warn("Khong tim thay SSH Host nao duoc cau hinh trong ~/.ssh/config.")
+            print_info("Chuan bi mo ~/.ssh/config de ban tu them Host...")
+            input("  An Enter de mo file cau hinh SSH...")
+            
+            ssh_config_path = os.path.expanduser("~/.ssh/config")
+            os.makedirs(os.path.dirname(ssh_config_path), exist_ok=True)
+            if not os.path.exists(ssh_config_path):
+                template_content = """# Vi du cau hinh SSH Host trong ~/.ssh/config
+# Host vin7
+#     HostName localhost
+#     Port 34984
+#     User s
+"""
+                with open(ssh_config_path, "w", encoding="utf-8") as f:
+                    f.write(template_content)
+                    
+            open_file_in_editor(ssh_config_path)
+            continue
+            
+        options = [f"SSH Host: {h}" for h in hosts]
+        options.append("Mo file ~/.ssh/config de tu them/sua SSH Host...")
+        options.append("Mo file xsync.ini de tu sua thu muc REMOTE_DIR/REMOTE_PULL_DIR...")
+        options.append("Thoat")
+
+        default_profile = get_default_profile(env_file_path)
+        default_idx = None
+        if default_profile and default_profile in hosts:
+            default_idx = hosts.index(default_profile)
+            
+        idx = prompt_menu("CHON SSH PROFILE (tu ~/.ssh/config)", options, default_idx=default_idx)
+        if idx < len(hosts):
+            selected_profile = hosts[idx]
+            set_default_profile(env_file_path, selected_profile)
+            break
+        elif idx == len(hosts):
+            print_info("Dang mo file ~/.ssh/config trong trinh soan thao...")
+            open_file_in_editor(os.path.expanduser("~/.ssh/config"))
+            continue
+        elif idx == len(hosts) + 1:
+            print_info("Dang mo file xsync.ini trong trinh soan thao...")
+            open_file_in_editor(env_file_path)
+            continue
+        else:
+            sys.exit(0)
+            
+    # Load env vars (directories) from xsync.ini for selected_profile
+    while True:
+        profiles = load_profiles(env_file_path)
+        env_vars = profiles.get(selected_profile, {})
+        
+        if env_vars.get("REMOTE_DIR"):
+            break
+            
+        print_warn(f"Host '{selected_profile}' chua duoc cau hinh thu muc REMOTE_DIR trong xsync.ini.")
+        print_info("Chuan bi mo file xsync.ini de ban tu khai bao...")
+        input("  An Enter de mo file cau hinh...")
+        
+        if selected_profile not in profiles:
+            save_profile(env_file_path, selected_profile, {
+                "SSH_PASSWORD": "",
+                "REMOTE_DIR": "/path/to/remote/dir"
+            })
+            
+        open_file_in_editor(env_file_path)
+        
+    # Nhap password neu thieu (chi dung khi muon authenticate qua password)
+    # Neu dung SSH key thi co the de trong
+    if not env_vars.get("SSH_PASSWORD"):
+        try:
+            import getpass
+            pwd_input = getpass.getpass(f"  Nhap mat khau SSH cho '{selected_profile}' (de trong neu dung SSH key): ")
+            if pwd_input:
+                env_vars["SSH_PASSWORD"] = pwd_input
+                env_from_tui = True
+        except KeyboardInterrupt:
+            print("")
+            sys.exit(130)
+            
+    # Initialize files and state
+    push_from_tui = False
+    pull_from_tui = False
+    push_include_tmpfile = None
+    pull_include_tmpfile = None
+    generated_filter_file = None
+    
+    def cleanup():
+        if generated_filter_file and os.path.exists(generated_filter_file):
+            try:
+                os.remove(generated_filter_file)
+            except OSError:
+                pass
+        if push_include_tmpfile and os.path.exists(push_include_tmpfile):
+            try:
+                os.remove(push_include_tmpfile)
+            except OSError:
+                pass
+        if pull_include_tmpfile and os.path.exists(pull_include_tmpfile):
+            try:
+                os.remove(pull_include_tmpfile)
+            except OSError:
+                pass
+        if selected_profile:
+            control_path = get_ssh_control_path(selected_profile)
+            cleanup_ssh_master(selected_profile, control_path)
+
+    atexit.register(cleanup)
+    
+    control_path = get_ssh_control_path(selected_profile)
+    print_info(f"Dang thiet lap ket noi SSH Master cho host '{selected_profile}'...")
+    ok, err_ssh = setup_ssh_master(
+        selected_profile, 
+        env_vars.get("SSH_PASSWORD", ""), 
+        control_path
+    )
+    if not ok:
+        print_err(f"Khong the xac thuc SSH: {err_ssh}")
+        sys.exit(1)
+    print_ok("Da thiet lap SSH Master thanh cong!")
+
+    # Tu dong xoa file trung ten tren server neu co (de nhuong cho cho thu muc)
+    for path_key in ["REMOTE_DIR"]:
+        rpath = env_vars.get(path_key)
+        if rpath:
+            rpath_clean = rpath.rstrip('/')
+            if rpath_clean:
+                check_cmd = [
+                    "ssh",
+                    "-o", f"ControlPath={control_path}",
+                    selected_profile,
+                    f"if [ -f '{rpath_clean}' ]; then rm -f '{rpath_clean}'; fi"
+                ]
+                subprocess.run(check_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # 3. Main Menu Selection
+    modes = [
+        "Day du lieu tu may len server  (PUSH)",
+        "Tai du lieu tu server ve may   (PULL)",
+        "Dung lai"
+    ]
+    mode_idx = prompt_menu("CHON CHE DO DONG BO", modes)
+    
+    if mode_idx == 2:
+        sys.exit(0)
+        
+    sync_mode = "push" if mode_idx == 0 else "pull"
+    
+    # Mode configurations
+    delete_enabled = False
+    if sync_mode == "push":
+        action_title = "CHUAN BI DAY DU LIEU LEN SERVER"
+        action_start = "BAT DAU DAY DU LIEU"
+        action_done = "HOAN TAT DAY DU LIEU!"
+        action_fail = "Day du lieu that bai. Kiem tra ket noi SSH va duong dan."
+        src_path = f"{config_dir}/"
+        dest_path = f"{selected_profile}:{env_vars['REMOTE_DIR'].rstrip('/')}/"
+        
+        # Ask delete option
+        delete_opts = [
+            "Co  (Xoa file tren Server neu khong co trong danh sach push)",
+            "Khong (Giu lai file tren Server)"
+        ]
+        del_idx = prompt_menu("CO DUNG FLAG --delete?", delete_opts)
+        delete_enabled = (del_idx == 0)
+    else:
+        action_title = "CHUAN BI TAI DU LIEU TU SERVER VE MAY"
+        action_start = "BAT DAU TAI DU LIEU"
+        action_done = "HOAN TAT TAI DU LIEU!"
+        action_fail = "Tai du lieu that bai. Kiem tra ket noi SSH va duong dan."
+        src_path = f"{selected_profile}:{env_vars['REMOTE_DIR'].rstrip('/')}/"
+        dest_path = config_dir
+        
+    # Setup paths and whitelists based on the selected mode
+    include_file_push = os.path.join(push_dir, "xsync.push.ini") if push_dir else None
+    include_file_pull = os.path.join(pull_dir, "xsync.pull.ini") if pull_dir else None
+    
+    # Helper template creator
+    def create_template(mode, local_val, remote_val):
+        base_hint = local_val if mode == "push" else remote_val
+        return f"""# Duong dan tuong doi so voi: {base_hint or '<remote_dir>'}
+# Thu muc ket bang /    Vi du:  mlops/datasets/
+# File khong co /       Vi du:  upload_run.py
+# Keo tha file/folder vao day: path tuyet doi se tu dong chuyen thanh tuong doi
+
+"""
+
+    if sync_mode == "push":
+        if not include_file_push:
+            print_warn("Khong tim thay xsync.push.ini.")
+            print_info("Hien giao dien nhap danh sach push...")
+            tpl = create_template("push", config_dir, env_vars.get("REMOTE_DIR"))
+            raw_text = edit_text_in_editor(tpl, "_push_whitelist")
+            
+            # Process lines
+            processed = process_include_paths(raw_text.splitlines(), "push", config_dir, env_vars.get("REMOTE_DIR"))
+            
+            # Write to temp file
+            fd, push_include_tmpfile = tempfile.mkstemp(suffix="_push_inc", text=True)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write("\n".join(processed) + "\n")
+            include_file_push = push_include_tmpfile
+            push_from_tui = True
+        else:
+            print_info(f"Dung xsync.push.ini tai: {push_dir}")
+    else: # sync_mode == "pull"
+        if not include_file_pull:
+            print_warn("Khong tim thay xsync.pull.ini.")
+            print_info("Hien giao dien nhap danh sach pull...")
+            tpl = create_template("pull", config_dir, env_vars.get("REMOTE_DIR"))
+            raw_text = edit_text_in_editor(tpl, "_pull_whitelist")
+            
+            # Process lines
+            processed = process_include_paths(raw_text.splitlines(), "pull", config_dir, env_vars.get("REMOTE_DIR"))
+            
+            # Write to temp file
+            fd, pull_include_tmpfile = tempfile.mkstemp(suffix="_pull_inc", text=True)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write("\n".join(processed) + "\n")
+            include_file_pull = pull_include_tmpfile
+            pull_from_tui = True
+        else:
+            print_info(f"Dung xsync.pull.ini tai: {pull_dir}")
+
+    print_header(action_title)
+    print_kv("Nguon", src_path)
+    print_kv("Dich", dest_path)
+    print_kv("SSH Host", selected_profile)
+    print_kv("Config dir", config_dir)
+    
+    # 4. Whitelist Filter Generation
+    active_whitelist_file = include_file_push if sync_mode == "push" else include_file_pull
+    
+    if active_whitelist_file and os.path.exists(active_whitelist_file):
+        with open(active_whitelist_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        cleaned_lines = process_include_paths(lines, sync_mode, config_dir, env_vars.get("REMOTE_DIR"))
+        rules = build_include_filter(cleaned_lines)
+        if rules:
+            # Write rules to temp file
+            fd, generated_filter_file = tempfile.mkstemp(suffix="_rsync_filter", text=True)
+            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                f.write("\n".join(rules) + "\n")
+            print_ok(f"Da ap dung whitelist {sync_mode}")
+        else:
+            print_warn(f"Whitelist {sync_mode} khong co entry hop le — {sync_mode} TOAN BO thu muc.")
+    else:
+        print_warn(f"Khong co whitelist {sync_mode} — {sync_mode} TOAN BO thu muc.")
+        
+    # 5. Run Dry-Run
+    print_header("DANG CHAY THU (DRY-RUN)")
+    dry_ok = run_dry_run(
+        sync_mode, config_dir, selected_profile,
+        env_vars["REMOTE_DIR"], generated_filter_file, delete_enabled
+    )
+    
+    if not dry_ok:
+        print_err("Dry-run that bai. Kiem tra SSH, quyen truy cap, duong dan remote va port.")
+        sys.exit(1)
+        
+    # 6. Ask Confirm execution
+    confirm_opts = [
+        "Tiep tuc (chay THAT)",
+        "Dung lai"
+    ]
+    conf_idx = prompt_menu("XAC NHAN CHAY THAT", confirm_opts)
+    if conf_idx == 1:
+        sys.exit(0)
+        
+    # 7. Executing parallel sync
+    print_header(action_start)
+    sync_ok = run_parallel_sync(
+        mode=sync_mode,
+        local_dir=config_dir,
+        host=selected_profile,
+        remote_dir=env_vars["REMOTE_DIR"],
+        filter_file=generated_filter_file,
+        delete=delete_enabled,
+        threads=4
+    )
+    
+    if sync_ok:
+        print_ok(action_done)
+        print("")
+        
+        # Prompt save configs
+        if env_from_tui or push_from_tui or pull_from_tui:
+            save_items = []
+            if env_from_tui:
+                save_items.append(("env", "Luu xsync.ini (SSH credentials + duong dan)", True))
+            if push_from_tui:
+                save_items.append(("push", "Luu xsync.push.ini (danh sach files push)", True))
+            if pull_from_tui:
+                save_items.append(("pull", "Luu xsync.pull.ini (danh sach files pull)", True))
+                
+            selected_saves = prompt_checklist("LUU CAU HINH", save_items)
+            
+            if "env" in selected_saves:
+                save_profile(env_file_path, selected_profile, env_vars)
+                print_ok(f"Da luu profile '{selected_profile}' vao xsync.ini")
+            if "push" in selected_saves and push_include_tmpfile and os.path.exists(push_include_tmpfile):
+                shutil.copy2(push_include_tmpfile, os.path.join(config_dir, "xsync.push.ini"))
+                print_ok("Da luu: xsync.push.ini")
+            if "pull" in selected_saves and pull_include_tmpfile and os.path.exists(pull_include_tmpfile):
+                shutil.copy2(pull_include_tmpfile, os.path.join(config_dir, "xsync.pull.ini"))
+                print_ok("Da luu: xsync.pull.ini")
+        sys.exit(0)
+    else:
+        print_err(action_fail)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
