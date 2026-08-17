@@ -1,0 +1,9 @@
+# File cau hinh mau cho xsync
+# Doi ten file nay thanh xsync.ini va dien thong tin cua ban
+
+[server-name]
+ssh_password = YOUR_SSH_PASSWORD
+remote_dir = /path/to/remote/directory
+
+[settings]
+default_profile = server-name

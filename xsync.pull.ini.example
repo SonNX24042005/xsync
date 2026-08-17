@@ -1,0 +1,7 @@
+# Danh sach thu muc hoac file muon tai ve tu server (Pull)
+# Thu muc ket thuc bang dau /
+# File khong co dau / o cuoi
+# Vi du:
+# outputs/runs/
+# weights/best.pt
+# logs/train.log

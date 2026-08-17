@@ -1,0 +1,7 @@
+# Danh sach thu muc hoac file muon day len server (Push)
+# Thu muc ket thuc bang dau /
+# File khong co dau / o cuoi
+# Vi du:
+# data/datasets/
+# models/checkpoint.pt
+# scripts/train.py
