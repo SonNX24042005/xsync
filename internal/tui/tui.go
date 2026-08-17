@@ -8,7 +8,40 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/manifoldco/promptui"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Lipgloss styles
+var (
+	headerStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("205")) // Magenta
+
+	helpStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("241")). // Gray
+			Italic(true)
+
+	activeItemStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("86")) // Bright Cyan
+
+	inactiveItemStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")) // Off-white
+
+	checkedStyle = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("82")) // Bright Green
+
+	uncheckedStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")) // Dark Gray
+
+	confirmActiveStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("82")) // Bright Green
+
+	confirmInactiveStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("245"))
 )
 
 const (
@@ -22,7 +55,7 @@ const (
 )
 
 func PrintHeader(title string) {
-	fmt.Printf("\n%s=== %s ===%s\n", CAccent, title, CReset)
+	fmt.Println(headerStyle.Render(fmt.Sprintf("\n=== %s ===", title)))
 }
 
 func PrintInfo(msg string) {
@@ -45,48 +78,121 @@ func PrintKV(key, val string) {
 	fmt.Printf("  %s%-20s%s %s\n", CInfo, key, CReset, val)
 }
 
-// PromptMenu displays an interactive arrow-navigable menu using promptui.
-func PromptMenu(title string, options []string, defaultIdx int) int {
-	cursorPos := 0
+// -----------------------------------------------------------------------------
+// Bubbletea Menu Model
+// -----------------------------------------------------------------------------
+
+type menuModel struct {
+	title      string
+	options    []string
+	cursor     int
+	defaultIdx int
+	selected   int
+	quitting   bool
+}
+
+func initialMenuModel(title string, options []string, defaultIdx int) menuModel {
+	cursor := 0
 	if defaultIdx >= 0 && defaultIdx < len(options) {
-		cursorPos = defaultIdx
+		cursor = defaultIdx
+	}
+	return menuModel{
+		title:      title,
+		options:    options,
+		cursor:     cursor,
+		defaultIdx: defaultIdx,
+		selected:   -1,
+	}
+}
+
+func (m menuModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			m.quitting = true
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			} else {
+				m.cursor = len(m.options) - 1
+			}
+		case "down", "j":
+			if m.cursor < len(m.options)-1 {
+				m.cursor++
+			} else {
+				m.cursor = 0
+			}
+		case "enter":
+			m.selected = m.cursor
+			return m, tea.Quit
+		default:
+			// Allow quick number selection
+			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
+				num := int(msg.String()[0] - '1')
+				if num < len(m.options) {
+					m.selected = num
+					return m, tea.Quit
+				}
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m menuModel) View() string {
+	if m.selected >= 0 || m.quitting {
+		return ""
 	}
 
-	displayItems := make([]string, len(options))
-	for i, opt := range options {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(headerStyle.Render(fmt.Sprintf("=== %s ===", m.title)))
+	sb.WriteString("\n")
+	sb.WriteString(helpStyle.Render("  (Dung phim mui ten ↑ / ↓ de di chuyen, Enter de chon)"))
+	sb.WriteString("\n\n")
+
+	for i, opt := range m.options {
 		suffix := ""
-		if defaultIdx >= 0 && i == defaultIdx {
+		if m.defaultIdx >= 0 && i == m.defaultIdx {
 			suffix = " (Mac dinh)"
 		}
-		displayItems[i] = fmt.Sprintf("%d) %s%s", i+1, opt, suffix)
-	}
 
-	templates := &promptui.SelectTemplates{
-		Label:    "{{ . | magenta }}:",
-		Active:   "\033[1;36m▸ {{ . | cyan }}\033[0m",
-		Inactive: "  {{ . }}",
-		Selected: "\033[32m✔\033[0m {{ . | bold }}",
-	}
-
-	prompt := promptui.Select{
-		Label:        title,
-		Items:        displayItems,
-		CursorPos:    cursorPos,
-		Size:         10,
-		Templates:    templates,
-		HideSelected: false,
-	}
-
-	idx, _, err := prompt.Run()
-	if err != nil {
-		if err == promptui.ErrInterrupt {
-			fmt.Println("\n  [INFO] Huy bo boi nguoi dung.")
-			os.Exit(130)
+		if m.cursor == i {
+			line := fmt.Sprintf("  ▸ %d) %s%s", i+1, opt, suffix)
+			sb.WriteString(activeItemStyle.Render(line))
+		} else {
+			line := fmt.Sprintf("    %d) %s%s", i+1, opt, suffix)
+			sb.WriteString(inactiveItemStyle.Render(line))
 		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// PromptMenu displays an interactive arrow-navigable menu using Bubble Tea.
+func PromptMenu(title string, options []string, defaultIdx int) int {
+	p := tea.NewProgram(initialMenuModel(title, options, defaultIdx))
+	m, err := p.Run()
+	if err != nil {
 		return promptMenuFallback(title, options, defaultIdx)
 	}
 
-	return idx
+	model := m.(menuModel)
+	if model.quitting || model.selected < 0 {
+		fmt.Println("\n  [INFO] Huy bo boi nguoi dung.")
+		os.Exit(130)
+	}
+
+	opt := options[model.selected]
+	fmt.Printf("\n  %s✔ Da chon:%s %s%s%s\n", COk, CReset, CBold, opt, CReset)
+	return model.selected
 }
 
 func promptMenuFallback(title string, options []string, defaultIdx int) int {
@@ -134,66 +240,142 @@ func promptMenuFallback(title string, options []string, defaultIdx int) int {
 	}
 }
 
+// -----------------------------------------------------------------------------
+// Bubbletea Checklist Model
+// -----------------------------------------------------------------------------
+
 type ChecklistItem struct {
 	Key     string
 	Label   string
 	Checked bool
 }
 
-// PromptChecklist displays an interactive toggleable checklist.
-func PromptChecklist(title string, items []ChecklistItem) []string {
+type checklistModel struct {
+	title    string
+	items    []ChecklistItem
+	selected []bool
+	cursor   int
+	quitting bool
+	done     bool
+}
+
+func initialChecklistModel(title string, items []ChecklistItem) checklistModel {
 	selected := make([]bool, len(items))
-	for i, item := range items {
-		selected[i] = item.Checked
+	for i, it := range items {
+		selected[i] = it.Checked
+	}
+	return checklistModel{
+		title:    title,
+		items:    items,
+		selected: selected,
+		cursor:   0,
+	}
+}
+
+func (m checklistModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m checklistModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	totalRows := len(m.items) + 1 // items + confirm button
+
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			m.quitting = true
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+			} else {
+				m.cursor = totalRows - 1
+			}
+		case "down", "j":
+			if m.cursor < totalRows-1 {
+				m.cursor++
+			} else {
+				m.cursor = 0
+			}
+		case " ":
+			if m.cursor < len(m.items) {
+				m.selected[m.cursor] = !m.selected[m.cursor]
+			}
+		case "enter":
+			if m.cursor == len(m.items) {
+				m.done = true
+				return m, tea.Quit
+			}
+			m.selected[m.cursor] = !m.selected[m.cursor]
+		default:
+			if len(msg.String()) == 1 && msg.String()[0] >= '1' && msg.String()[0] <= '9' {
+				idx := int(msg.String()[0] - '1')
+				if idx < len(m.items) {
+					m.selected[idx] = !m.selected[idx]
+					m.cursor = idx
+				}
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m checklistModel) View() string {
+	if m.done || m.quitting {
+		return ""
 	}
 
-	cursorPos := 0
-	for {
-		var menuOptions []string
-		for i, item := range items {
-			status := "[ ]"
-			if selected[i] {
-				status = "[X]"
-			}
-			menuOptions = append(menuOptions, fmt.Sprintf("%s %d) %s", status, i+1, item.Label))
-		}
-		menuOptions = append(menuOptions, "✔  Xac nhan va tiep tuc")
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(headerStyle.Render(fmt.Sprintf("=== %s ===", m.title)))
+	sb.WriteString("\n")
+	sb.WriteString(helpStyle.Render("  (Dung ↑ / ↓ de di chuyen, Space de bat/tat, Enter tren [Xac nhan] de luu)"))
+	sb.WriteString("\n\n")
 
-		templates := &promptui.SelectTemplates{
-			Label:    "{{ . | magenta }}:",
-			Active:   "\033[1;36m▸ {{ . | cyan }}\033[0m",
-			Inactive: "  {{ . }}",
-			Selected: "\033[32m✔\033[0m {{ . | bold }}",
+	for i, item := range m.items {
+		status := uncheckedStyle.Render("[ ]")
+		if m.selected[i] {
+			status = checkedStyle.Render("[X]")
 		}
 
-		prompt := promptui.Select{
-			Label:        title + " (Chon de bat/tat [X], chon 'Xac nhan' khi xong)",
-			Items:        menuOptions,
-			CursorPos:    cursorPos,
-			Size:         len(menuOptions) + 2,
-			Templates:    templates,
-			HideSelected: true,
+		if m.cursor == i {
+			line := fmt.Sprintf("  ▸ %s %d) %s", status, i+1, item.Label)
+			sb.WriteString(activeItemStyle.Render(line))
+		} else {
+			line := fmt.Sprintf("    %s %d) %s", status, i+1, item.Label)
+			sb.WriteString(inactiveItemStyle.Render(line))
 		}
+		sb.WriteString("\n")
+	}
 
-		idx, _, err := prompt.Run()
-		if err != nil {
-			if err == promptui.ErrInterrupt {
-				fmt.Println("\n  [INFO] Huy bo boi nguoi dung.")
-				os.Exit(130)
-			}
-			return promptChecklistFallback(title, items)
-		}
+	// Confirm button
+	sb.WriteString("\n")
+	if m.cursor == len(m.items) {
+		sb.WriteString(confirmActiveStyle.Render("  ▸ [ ✔  Xac nhan va tiep tuc ]"))
+	} else {
+		sb.WriteString(confirmInactiveStyle.Render("    [ ✔  Xac nhan va tiep tuc ]"))
+	}
+	sb.WriteString("\n")
 
-		if idx == len(items) {
-			break
-		}
+	return sb.String()
+}
 
-		selected[idx] = !selected[idx]
-		cursorPos = idx
+// PromptChecklist displays an interactive toggleable checklist using Bubble Tea.
+func PromptChecklist(title string, items []ChecklistItem) []string {
+	p := tea.NewProgram(initialChecklistModel(title, items))
+	m, err := p.Run()
+	if err != nil {
+		return promptChecklistFallback(title, items)
+	}
+
+	model := m.(checklistModel)
+	if model.quitting {
+		fmt.Println("\n  [INFO] Huy bo boi nguoi dung.")
+		os.Exit(130)
 	}
 
 	var result []string
-	for i, sel := range selected {
+	for i, sel := range model.selected {
 		if sel {
 			result = append(result, items[i].Key)
 		}
