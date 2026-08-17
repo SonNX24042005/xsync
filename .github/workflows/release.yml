@@ -22,6 +22,10 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
 
     steps:
       - name: Checkout code
@@ -35,15 +39,25 @@ jobs:
       - name: Build binary
         run: |
           mkdir -p dist
-          BINARY_NAME=xsync
-          OUTPUT_NAME="dist/${BINARY_NAME}"
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd/xsync
-          cd dist
-          tar -czvf "xsync_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${BINARY_NAME}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BINARY_NAME="xsync.exe"
+            OUTPUT_NAME="dist/${BINARY_NAME}"
+            GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd/xsync
+            cd dist
+            zip "xsync_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${BINARY_NAME}"
+          else
+            BINARY_NAME="xsync"
+            OUTPUT_NAME="dist/${BINARY_NAME}"
+            GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd/xsync
+            cd dist
+            tar -czvf "xsync_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${BINARY_NAME}"
+          fi
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.tar.gz
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
