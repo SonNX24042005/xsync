@@ -245,3 +245,52 @@ func SetDefaultProfile(iniPath string, profileName string) error {
 	data.Sections["settings"]["default_profile"] = profileName
 	return writeIniFile(iniPath, data)
 }
+
+// EnsureConfigFiles checks and creates xsync.ini, xsync.push.ini, and xsync.pull.ini in configDir if they don't exist.
+func EnsureConfigFiles(configDir string) []string {
+	var created []string
+
+	iniPath := filepath.Join(configDir, "xsync.ini")
+	if _, err := os.Stat(iniPath); os.IsNotExist(err) {
+		template := `# Cau hinh dong bo SSH cho xsync
+# Khai bao cac Host tuong ung voi Host trong ~/.ssh/config
+
+# [my-server]
+# ssh_password = YOUR_SSH_PASSWORD
+# remote_dir = /path/to/remote/directory
+
+# [settings]
+# default_profile = my-server
+`
+		if err := os.WriteFile(iniPath, []byte(template), 0o644); err == nil {
+			created = append(created, "xsync.ini")
+		}
+	}
+
+	pushPath := filepath.Join(configDir, "xsync.push.ini")
+	if _, err := os.Stat(pushPath); os.IsNotExist(err) {
+		template := `# Danh sach thu muc hoac file muon day len server (Push)
+# Thu muc ket thuc bang dau / (vi du: data/datasets/)
+# File khong co dau / o cuoi (vi du: scripts/train.py)
+
+`
+		if err := os.WriteFile(pushPath, []byte(template), 0o644); err == nil {
+			created = append(created, "xsync.push.ini")
+		}
+	}
+
+	pullPath := filepath.Join(configDir, "xsync.pull.ini")
+	if _, err := os.Stat(pullPath); os.IsNotExist(err) {
+		template := `# Danh sach thu muc hoac file muon tai ve tu server (Pull)
+# Thu muc ket thuc bang dau / (vi du: outputs/runs/)
+# File khong co dau / o cuoi (vi du: weights/best.pt)
+
+`
+		if err := os.WriteFile(pullPath, []byte(template), 0o644); err == nil {
+			created = append(created, "xsync.pull.ini")
+		}
+	}
+
+	return created
+}
+
