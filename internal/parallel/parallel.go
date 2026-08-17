@@ -126,7 +126,7 @@ func stderrReader(r io.Reader, jobID int, errorsList *[]string, mu *sync.Mutex) 
 // RunParallelSync manages parallel rsync transfers.
 func RunParallelSync(mode, localDir, host, remoteDir, filterFile string, deleteFiles bool, threads int) bool {
 	sshControlPath := fmt.Sprintf("/tmp/rsync-ctrl-%s", host)
-	sshCmd := fmt.Sprintf("ssh -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=%s -c aes128-gcm@openssh.com -o Compression=no -o IPQoS=throughput", sshControlPath)
+	sshCmd := fmt.Sprintf("ssh -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=%s -o BatchMode=yes -c aes128-gcm@openssh.com -o Compression=no -o IPQoS=throughput", sshControlPath)
 
 	rsyncBase := []string{
 		"-aW",
@@ -213,7 +213,7 @@ func RunParallelSync(mode, localDir, host, remoteDir, filterFile string, deleteF
 					quoted = append(quoted, fmt.Sprintf("'%s'", filepath.Join(remoteDir, f)))
 				}
 				delCmdStr := fmt.Sprintf("rm -rf %s", strings.Join(quoted, " "))
-				delCmd := exec.Command("ssh", "-o", fmt.Sprintf("ControlPath=%s", sshControlPath), host, delCmdStr)
+				delCmd := exec.Command("ssh", "-o", "ControlMaster=auto", "-o", "BatchMode=yes", "-o", fmt.Sprintf("ControlPath=%s", sshControlPath), host, delCmdStr)
 				_ = delCmd.Run()
 			}
 		}

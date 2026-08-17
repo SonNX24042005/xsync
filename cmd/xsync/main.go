@@ -208,7 +208,20 @@ func main() {
 
 	// Delete file with identical name on remote to prevent collision
 	if rpath := strings.TrimRight(envVars.RemoteDir, "/"); rpath != "" {
-		checkCmd := exec.Command("ssh", "-o", fmt.Sprintf("ControlPath=%s", controlPath), selectedProfile, fmt.Sprintf("if [ -f '%s' ]; then rm -f '%s'; fi", rpath, rpath))
+		checkArgs := []string{
+			"-o", "ControlMaster=auto",
+			"-o", fmt.Sprintf("ControlPath=%s", controlPath),
+			"-o", "BatchMode=yes",
+			selectedProfile,
+			fmt.Sprintf("if [ -f '%s' ]; then rm -f '%s'; fi", rpath, rpath),
+		}
+		var checkCmd *exec.Cmd
+		if envVars.SSHPassword != "" {
+			checkCmd = exec.Command("sshpass", append([]string{"-e", "ssh"}, checkArgs...)...)
+			checkCmd.Env = append(os.Environ(), "SSHPASS="+envVars.SSHPassword)
+		} else {
+			checkCmd = exec.Command("ssh", checkArgs...)
+		}
 		_ = checkCmd.Run()
 	}
 

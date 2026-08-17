@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 	"xsync/internal/tui"
 )
 
@@ -57,6 +58,25 @@ func SetupSSHMaster(host, password, controlPath string) (bool, string) {
 	if err := cmd.Run(); err != nil {
 		return false, strings.TrimSpace(stderr.String())
 	}
+
+	// Cho toi da 5 giay de file socket duoc tao thanh cong boi daemon SSH chay ngam
+	socketReady := false
+	for i := 0; i < 50; i++ {
+		if _, err := os.Stat(controlPath); err == nil {
+			socketReady = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	if !socketReady {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = "Khong the tao SSH Master socket. Vui long kiem tra lai mat khau SSH hoac ket noi toi host."
+		}
+		return false, errMsg
+	}
+
 	return true, ""
 }
 
@@ -70,7 +90,7 @@ func CleanupSSHMaster(host, controlPath string) {
 
 func RunDryRun(mode, localDir, host, remoteDir, filterFile string, delete bool) bool {
 	controlPath := GetSSHControlPath(host)
-	sshCmd := fmt.Sprintf("ssh -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=%s -c aes128-gcm@openssh.com -o Compression=no -o IPQoS=throughput", controlPath)
+	sshCmd := fmt.Sprintf("ssh -o ControlMaster=auto -o ControlPersist=10m -o ControlPath=%s -o BatchMode=yes -c aes128-gcm@openssh.com -o Compression=no -o IPQoS=throughput", controlPath)
 
 	args := []string{
 		"-avW",

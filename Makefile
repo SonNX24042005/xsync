@@ -14,6 +14,7 @@ build:
 
 install: build
 	@mkdir -p $(INSTALL_DIR)
+	@rm -f $(INSTALL_DIR)/$(BINARY_NAME)
 	@cp $(BUILD_DIR)/$(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
 	@chmod +x $(INSTALL_DIR)/$(BINARY_NAME)
 	@echo "Da cai dat $(BINARY_NAME) vao $(INSTALL_DIR)/$(BINARY_NAME)"

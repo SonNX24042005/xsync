@@ -65,6 +65,7 @@ if curl -fsSL -I "${RELEASE_URL}" > /dev/null 2>&1; then
     info "Dang tai tu: ${RELEASE_URL}"
     if curl -fsSL "${RELEASE_URL}" | tar -xz -C "${TMP_DIR}" 2>/dev/null; then
         if [ -f "${TMP_DIR}/${BINARY_NAME}" ]; then
+            rm -f "${TARGET_PATH}"
             mv "${TMP_DIR}/${BINARY_NAME}" "${TARGET_PATH}"
             chmod +x "${TARGET_PATH}"
             ok "Da tai va cai dat binary tu GitHub Releases thanh cong!"
@@ -80,6 +81,7 @@ if [ ${INSTALLED} -eq 0 ]; then
         info "Phat hien Go compiler: $(go version)"
         
         # Check if running inside local source repo
+        rm -f "${TARGET_PATH}"
         if [ -f "cmd/xsync/main.go" ]; then
             info "Dang bien dich tu thu muc ma nguon hien tai..."
             go build -ldflags="-s -w" -o "${TARGET_PATH}" ./cmd/xsync
