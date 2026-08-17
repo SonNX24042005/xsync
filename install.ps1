@@ -29,10 +29,19 @@ Write-Host "         CAI DAT XSYNC (PARALLEL RSYNC CLI)           " -ForegroundC
 Write-Host "======================================================" -ForegroundColor Magenta
 Write-Host ""
 
-# 1. Kiem tra kien truc may
-$Arch = if ([System.Environment]::Is64BitOperatingSystem) { "amd64" } else { "386" }
-$ZipName = "xsync_windows_${Arch}.zip"
-$ReleaseUrl = "https://github.com/${Repo}/releases/latest/download/${ZipName}"
+# 1. Kiem tra Go compiler
+if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+    Write-Err "Khong tim thay Go compiler tren may Windows."
+    Write-Host ""
+    Write-Host "  Vui long cai dat Go de bien dich:" -ForegroundColor Yellow
+    Write-Host "    - Qua Scoop:  scoop install go" -ForegroundColor White
+    Write-Host "    - Qua Winget: winget install GoLang.Go" -ForegroundColor White
+    Write-Host "    - Hoac tai:   https://go.dev/dl/" -ForegroundColor White
+    Write-Host ""
+    exit 1
+}
+
+Write-Info "Phat hien Go compiler: $((Get-Command go).Source)"
 
 # 2. Tao thu muc cai dat
 if (-not (Test-Path $InstallDir)) {
@@ -41,57 +50,31 @@ if (-not (Test-Path $InstallDir)) {
 
 $TargetPath = Join-Path $InstallDir $BinaryName
 $TempDir = Join-Path $env:TEMP "xsync_install_$([System.Guid]::NewGuid().ToString('N'))"
-New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
-$Installed = $false
-
-# 3. Tai pre-built binary tu GitHub Releases
 try {
-    Write-Info "Dang tai pre-built binary tu GitHub Releases: $ReleaseUrl ..."
-    $ZipPath = Join-Path $TempDir $ZipName
-    Invoke-WebRequest -Uri $ReleaseUrl -OutFile $ZipPath -UseBasicParsing
-    
-    Expand-Archive -Path $ZipPath -DestinationPath $TempDir -Force
-    $ExtractedExe = Join-Path $TempDir "xsync.exe"
-    if (-not (Test-Path $ExtractedExe)) {
-        $ExtractedExe = Join-Path $TempDir "xsync"
-    }
-
-    if (Test-Path $ExtractedExe) {
-        if (Test-Path $TargetPath) {
-            Remove-Item $TargetPath -Force
+    if (Test-Path "cmd/xsync/main.go") {
+        Write-Info "Dang bien dich tu ma nguon thu muc hien tai..."
+        if (Test-Path $TargetPath) { Remove-Item $TargetPath -Force }
+        go build -ldflags="-s -w" -o $TargetPath ./cmd/xsync
+    } else {
+        Write-Info "Dang clone ma nguon tu GitHub..."
+        git clone --depth 1 "https://github.com/${Repo}.git" $TempDir
+        if (Test-Path (Join-Path $TempDir "cmd/xsync/main.go")) {
+            Write-Info "Dang bien dich binary xsync..."
+            Set-Location $TempDir
+            if (Test-Path $TargetPath) { Remove-Item $TargetPath -Force }
+            go build -ldflags="-s -w" -o $TargetPath ./cmd/xsync
+        } else {
+            Write-Err "Khong the clone ma nguon tu repository."
+            exit 1
         }
-        Move-Item -Path $ExtractedExe -Destination $TargetPath -Force
-        $Installed = $true
-        Write-Ok "Da tai va cai dat binary thanh cong vao: $TargetPath"
     }
-} catch {
-    Write-Warn "Khong the tai pre-built binary truc tiep: $_"
+    Write-Ok "Da bien dich va cai dat xsync thanh cong tai: $TargetPath"
 } finally {
     Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-# 4. Fallback: Bien dich tu ma nguon neu co Go compiler
-if (-not $Installed) {
-    if (Get-Command go -ErrorAction SilentlyContinue) {
-        Write-Info "Phat hien Go compiler tren may. Dang bien dich tu ma nguon..."
-        $SrcTemp = Join-Path $env:TEMP "xsync_src_$([System.Guid]::NewGuid().ToString('N'))"
-        try {
-            git clone --depth 1 "https://github.com/${Repo}.git" $SrcTemp
-            Set-Location $SrcTemp
-            go build -ldflags="-s -w" -o $TargetPath ./cmd/xsync
-            $Installed = $true
-            Write-Ok "Da bien dich va cai dat xsync thanh cong vao: $TargetPath"
-        } finally {
-            Remove-Item -Path $SrcTemp -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    } else {
-        Write-Err "Cai dat that bai. Vui long kiem tra lai ket noi mang hoac cai dat Go compiler."
-        exit 1
-    }
-}
-
-# 5. Cap nhat bien moi truong PATH
+# 3. Cap nhat bien moi truong PATH
 $UserPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
 if ($UserPath -notlike "*$InstallDir*") {
     Write-Info "Dang them '$InstallDir' vao bien moi truong PATH..."
@@ -100,19 +83,16 @@ if ($UserPath -notlike "*$InstallDir*") {
     Write-Ok "Da them xsync vao PATH thanh cong!"
 }
 
-# 6. Kiem tra phu thuoc rsync tren Windows
+# 4. Kiem tra phu thuoc rsync
 Write-Host ""
 Write-Info "Dang kiem tra cong cu rsync tren Windows..."
 if (Get-Command rsync -ErrorAction SilentlyContinue) {
-    Write-Ok "Da tim thay rsync tren he thong: $((Get-Command rsync).Source)"
+    Write-Ok "Da tim thay rsync: $((Get-Command rsync).Source)"
 } else {
     Write-Warn "Chua tim thay cong cu 'rsync' trong PATH."
     Write-Host ""
-    Write-Host "  De su dung xsync tren Windows, ban co the chon mot trong cac cach sau:" -ForegroundColor Yellow
-    Write-Host "  1. Cai dat rsync qua Scoop: (Khuyen nghi)" -ForegroundColor Cyan
-    Write-Host "       scoop install rsync" -ForegroundColor White
-    Write-Host "  2. Su dung ben trong Git Bash (da co san SSH & ho tro cai rsync)" -ForegroundColor Cyan
-    Write-Host "  3. Su dung thong qua WSL (Windows Subsystem for Linux)" -ForegroundColor Cyan
+    Write-Host "  De su dung tren Windows, ban co the cai dat rsync qua Scoop:" -ForegroundColor Yellow
+    Write-Host "    scoop install rsync" -ForegroundColor White
     Write-Host ""
 }
 
