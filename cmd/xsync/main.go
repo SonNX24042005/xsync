@@ -54,6 +54,11 @@ func main() {
 
 	migrateOldConfigs(configDir)
 
+	createdConfigs := config.EnsureConfigFiles(configDir)
+	for _, f := range createdConfigs {
+		tui.PrintOk(fmt.Sprintf("Da tu dong tao file cau hinh: %s", f))
+	}
+
 	envDir := config.FindConfigNearest("xsync.ini", 8)
 	pushDir := config.FindConfigNearest("xsync.push.ini", 8)
 	pullDir := config.FindConfigNearest("xsync.pull.ini", 8)

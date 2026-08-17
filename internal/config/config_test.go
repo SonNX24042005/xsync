@@ -45,3 +45,30 @@ func TestIniSaveAndLoad(t *testing.T) {
 		t.Errorf("got default profile '%s', want 'server1'", defaultProfile)
 	}
 }
+
+func TestEnsureConfigFiles(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "xsync_ensure_test_*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	created := EnsureConfigFiles(tempDir)
+	if len(created) != 3 {
+		t.Errorf("expected 3 created files, got %d: %v", len(created), created)
+	}
+
+	for _, name := range []string{"xsync.ini", "xsync.push.ini", "xsync.pull.ini"} {
+		path := filepath.Join(tempDir, name)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			t.Errorf("expected file %s to exist", name)
+		}
+	}
+
+	// Second run should create nothing
+	createdSecond := EnsureConfigFiles(tempDir)
+	if len(createdSecond) != 0 {
+		t.Errorf("expected 0 files on second run, got %d: %v", len(createdSecond), createdSecond)
+	}
+}
+
