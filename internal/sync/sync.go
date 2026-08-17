@@ -1,7 +1,6 @@
 package sync
 
 import (
-	"bufio"
 	"bytes"
 	"fmt"
 	"os"
@@ -95,7 +94,6 @@ func RunDryRun(mode, localDir, host, remoteDir, filterFile string, delete bool) 
 	args := []string{
 		"-avW",
 		"--partial",
-		"--info=progress2",
 		"-e", sshCmd,
 		"--dry-run",
 	}
@@ -123,25 +121,94 @@ func RunDryRun(mode, localDir, host, remoteDir, filterFile string, delete bool) 
 	args = append(args, src, dest)
 	cmd := exec.Command("rsync", args...)
 
-	stdoutPipe, err := cmd.StdoutPipe()
+	outBytes, err := cmd.CombinedOutput()
 	if err != nil {
-		tui.PrintErr(fmt.Sprintf("Khong the mo pipe rsync: %v", err))
-		return false
-	}
-	cmd.Stderr = cmd.Stdout
-
-	if err := cmd.Start(); err != nil {
-		tui.PrintErr(fmt.Sprintf("Khong the khoi chay rsync: %v", err))
+		tui.PrintErr(fmt.Sprintf("Dry-run gap loi: %s", string(outBytes)))
 		return false
 	}
 
-	scanner := bufio.NewScanner(stdoutPipe)
-	for scanner.Scan() {
-		fmt.Printf("  %s\n", scanner.Text())
+	lines := strings.Split(string(outBytes), "\n")
+	var filesToTransfer []string
+	var filesToDelete []string
+	totalStats := ""
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "deleting ") {
+			filesToDelete = append(filesToDelete, strings.TrimPrefix(line, "deleting "))
+		} else if strings.HasPrefix(line, "sending incremental") ||
+			strings.HasPrefix(line, "receiving incremental") ||
+			strings.HasPrefix(line, "sent ") ||
+			strings.HasPrefix(line, "speedup is") ||
+			strings.HasPrefix(line, "created directory ") ||
+			strings.Contains(line, "bytes/sec") {
+			continue
+		} else if strings.HasPrefix(line, "total size") {
+			totalStats = line
+		} else if strings.HasSuffix(line, "/") {
+			continue
+		} else {
+			filesToTransfer = append(filesToTransfer, line)
+		}
 	}
 
-	if err := cmd.Wait(); err != nil {
-		return false
+	// Ghi toan bo log chi tiet vao file log tam
+	logFileName := fmt.Sprintf("/tmp/xsync_dryrun_%d.log", time.Now().Unix())
+	_ = os.WriteFile(logFileName, outBytes, 0o644)
+
+	// Hien thi danh sach file can xoa (neu co)
+	if len(filesToDelete) > 0 {
+		fmt.Printf("\n  %s[CAN XOA TREN DICH - %d tep]:%s\n", tui.CErr, len(filesToDelete), tui.CReset)
+		if len(filesToDelete) <= 10 {
+			for _, f := range filesToDelete {
+				fmt.Printf("    %s- %s%s\n", tui.CErr, f, tui.CReset)
+			}
+		} else {
+			for i := 0; i < 5; i++ {
+				fmt.Printf("    %s- %s%s\n", tui.CErr, filesToDelete[i], tui.CReset)
+			}
+			fmt.Printf("    %s... (va %d tep xoa khac) ...%s\n", tui.CWarn, len(filesToDelete)-8, tui.CReset)
+			for i := len(filesToDelete) - 3; i < len(filesToDelete); i++ {
+				fmt.Printf("    %s- %s%s\n", tui.CErr, filesToDelete[i], tui.CReset)
+			}
+		}
 	}
+
+	// Hien thi danh sach file can truyen tai
+	fmt.Printf("\n  %s[DANH SACH TEP CAN TRUYEN TAI - %d tep]:%s\n", tui.CInfo, len(filesToTransfer), tui.CReset)
+	if len(filesToTransfer) == 0 {
+		tui.PrintOk("Khong co tep nao thay doi can truyen tai.")
+	} else if len(filesToTransfer) <= 20 {
+		for _, f := range filesToTransfer {
+			fmt.Printf("    %s+ %s%s\n", tui.COk, f, tui.CReset)
+		}
+	} else {
+		// Hien thi 10 file dau
+		for i := 0; i < 10; i++ {
+			fmt.Printf("    %s+ %s%s\n", tui.COk, filesToTransfer[i], tui.CReset)
+		}
+		// Thong bao an bot
+		fmt.Printf("    %s... (an %d tep khac de tranh tran man hinh) ...%s\n", tui.CWarn, len(filesToTransfer)-15, tui.CReset)
+		// Hien thi 5 file cuoi
+		for i := len(filesToTransfer) - 5; i < len(filesToTransfer); i++ {
+			fmt.Printf("    %s+ %s%s\n", tui.COk, filesToTransfer[i], tui.CReset)
+		}
+	}
+
+	// Bang tong ket
+	fmt.Println("\n════════════════════════════════════════════════════════════════")
+	tui.PrintKV("Tong so tep can truyen", fmt.Sprintf("%d tep", len(filesToTransfer)))
+	if len(filesToDelete) > 0 {
+		tui.PrintKV("Tong so tep can xoa", fmt.Sprintf("%d tep", len(filesToDelete)))
+	}
+	if totalStats != "" {
+		tui.PrintKV("Thong tin dung luong", totalStats)
+	}
+	tui.PrintKV("File log chi tiet", logFileName)
+	fmt.Println("════════════════════════════════════════════════════════════════")
+
 	return true
 }
