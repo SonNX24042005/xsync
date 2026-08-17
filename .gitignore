@@ -1,0 +1,12 @@
+# Binaries & build
+bin/
+
+# Config files with sensitive info
+*.ini
+!*.ini.example
+.env_rsync
+.rsyncinclude.*
+
+# Temporary / OS
+.vscode/
+test/
