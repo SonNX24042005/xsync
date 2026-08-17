@@ -2,71 +2,45 @@
 
 `xsync` là công cụ dòng lệnh (CLI / TUI) hiệu năng cao được viết bằng **Go (Golang)**, tự động hoá việc đồng bộ thư mục/file hai chiều giữa máy cục bộ (Local) và máy chủ từ xa (Remote Server) thông qua giao thức SSH và `rsync`.
 
-Dự án hỗ trợ:
-- **Single binary**: Đóng gói thành 1 file nhị phân độc lập duy nhất.
-- **Đồng bộ song song (Parallel sync)**: Phân luồng nhiều tiến trình `rsync` truyền tải đồng thời, tối ưu băng thông.
-- **SSH Master Socket**: Tái sử dụng phiên SSH đã xác thực, giảm tối đa độ trễ.
-- **Whitelist**: Lọc danh sách trắng các thư mục và tập tin để tải lên (`xsync.push.ini`) hoặc tải xuống (`xsync.pull.ini`).
-- **Live Dashboard**: Hiển thị thanh tiến trình trực quan theo thời gian thực trên terminal.
+### Tính năng nổi bật:
+- **Đóng gói nhị phân độc lập (Single binary):** Không cần cài đặt môi trường Go hay Python để sử dụng.
+- **Đồng bộ song song (Parallel sync):** Phân luồng nhiều tiến trình `rsync` chạy đồng thời, tối ưu băng thông mạng.
+- **SSH Master Socket:** Tái sử dụng phiên SSH đã xác thực, giảm tối đa độ trễ bắt tay kết nối.
+- **Danh sách trắng (Whitelist):** Lọc chính xác các thư mục/tập tin cần đẩy lên (`xsync.push.ini`) hoặc tải về (`xsync.pull.ini`).
+- **Live Dashboard:** Theo dõi tiến độ, tốc độ truyền tải của từng luồng theo thời gian thực trên terminal.
 
 ---
 
 ## 1. Yêu cầu hệ thống (Prerequisites)
 
-Hệ thống Linux/macOS cần cài đặt sẵn `rsync` và `sshpass`:
+Hệ thống Linux hoặc macOS cần có sẵn `rsync` và `sshpass`:
 
 ```bash
 # Ubuntu / Debian
-sudo apt update
-sudo apt install rsync sshpass -y
-```
+sudo apt update && sudo apt install -y rsync sshpass
 
-Để biên dịch mã nguồn Go:
-- Cài đặt Go (phiên bản 1.22 trở lên).
+# macOS (Homebrew)
+brew install rsync esolitos/ipa/sshpass
+```
 
 ---
 
 ## 2. Cài đặt (Installation)
 
-### Cách 1: Cài đặt nhanh bằng một câu lệnh `curl` (Khuyên dùng)
-
-Chỉ cần chạy lệnh sau trên terminal (tự động nhận diện hệ điều hành, tải binary hoặc tự build từ mã nguồn Go):
+Chỉ cần chạy một câu lệnh duy nhất dưới đây trên terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.sh | bash
 ```
 
-Hoặc nếu đã tải mã nguồn về máy:
-
-```bash
-./install.sh
-```
-
-### Cách 2: Biên dịch thủ công bằng Makefile
-
-```bash
-# Biên dịch file binary vào thư mục bin/
-make build
-
-# Cài đặt file binary xsync vào ~/.local/bin/
-make install
-
-# Chạy kiểm thử đơn vị
-make test
-```
-
-### Cách 3: Biên dịch trực tiếp bằng Go
-
-```bash
-go build -ldflags="-s -w" -o bin/xsync ./cmd/xsync
-```
+> **Lưu ý:** Script cài đặt sẽ tự động nhận diện hệ điều hành/kiến trúc CPU, tải bản binary phù hợp vào `~/.local/bin/xsync` và tự cấu hình biến môi trường `PATH`.
 
 ---
 
 ## 3. Cấu hình
 
 ### A. Cấu hình máy chủ SSH (`~/.ssh/config`)
-`xsync` tự động đọc danh sách host trong file `~/.ssh/config`. Ví dụ:
+`xsync` tự động nhận diện các host đã cấu hình trong file `~/.ssh/config`. Ví dụ:
 
 ```text
 Host my-server
@@ -76,7 +50,7 @@ Host my-server
 ```
 
 ### B. Cấu hình thư mục đồng bộ (`xsync.ini`)
-Tạo file `xsync.ini` tại thư mục làm việc:
+Tạo file `xsync.ini` tại thư mục làm việc (hoặc sao chép từ `xsync.ini.example`):
 
 ```ini
 [my-server]
@@ -102,21 +76,15 @@ scripts/train.py
 
 ## 4. Cách sử dụng
 
-Sau khi cài đặt, bạn chỉ cần gõ lệnh `xsync` tại bất kỳ thư mục dự án nào:
+Sau khi cài đặt xong, bạn có thể gọi lệnh `xsync` tại bất kỳ thư mục nào:
 
 ```bash
 xsync
 ```
 
-Hoặc chạy file nhị phân trực tiếp:
-
-```bash
-./bin/xsync
-```
-
-Menu điều hướng sẽ hướng dẫn chi tiết từng bước:
-1. **Chọn SSH host**: Chọn từ danh sách host trong `~/.ssh/config`.
-2. **Chế độ đồng bộ**: Đẩy dữ liệu (Push) hoặc Tải dữ liệu (Pull).
-3. **Tùy chọn `--delete` (cho Push)**: Xóa file thừa trên server nếu không có trong danh sách đẩy.
-4. **Dry-Run (Chạy thử)**: Quét và hiển thị trước danh sách file sẽ thay đổi.
-5. **Xác nhận thực thi**: Chạy truyền tải song song đa luồng và hiển thị tiến trình realtime.
+Giao diện tương tác sẽ hướng dẫn bạn từng bước:
+1. **Chọn SSH host:** Chọn máy chủ từ danh sách `~/.ssh/config`.
+2. **Chế độ đồng bộ:** Đẩy dữ liệu (Push) hoặc Tải dữ liệu (Pull).
+3. **Tùy chọn `--delete` (cho Push):** Xóa file thừa trên server nếu không có trong danh sách đẩy.
+4. **Dry-Run (Chạy thử):** Quét và hiển thị trước toàn bộ danh sách file sẽ thay đổi mà không làm ảnh hưởng đến dữ liệu.
+5. **Xác nhận thực thi:** Chạy truyền tải song song đa luồng và hiển thị tiến trình trực quan.
