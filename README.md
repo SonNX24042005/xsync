@@ -46,7 +46,7 @@ Mở PowerShell và chạy lệnh:
 irm https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.ps1 | iex
 ```
 
-> **Lưu ý:** Script cài đặt sẽ tự động nhận diện hệ điều hành và kiến trúc CPU, tải bản binary phù hợp, lưu vào thư mục hệ thống và tự cấu hình biến môi trường `PATH`.
+> **Lưu ý:** Script cài đặt hoàn toàn độc lập, không yêu cầu cài đặt Go compiler. Script sẽ tự động nhận diện hệ điều hành, tự cài đặt các phụ thuộc (`rsync`, `sshpass`), tải bản binary phù hợp từ GitHub Releases/kho lưu trữ và tự cấu hình biến môi trường `PATH`.
 
 ---
 
