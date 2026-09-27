@@ -8,6 +8,7 @@
 - **Đồng bộ song song (Parallel sync):** Phân luồng nhiều tiến trình `rsync` chạy đồng thời, tối ưu băng thông mạng.
 - **SSH Master Socket:** Tái sử dụng phiên SSH đã xác thực, giảm tối đa độ trễ bắt tay kết nối.
 - **Danh sách trắng (Whitelist):** Lọc chính xác các thư mục/tập tin cần đẩy lên (`xsync.push.ini`) hoặc tải về (`xsync.pull.ini`).
+- **Hỗ trợ đa ngôn ngữ (i18n):** Lựa chọn tiếng Anh hoặc tiếng Việt ngay khi cài đặt, tự động lưu cấu hình và hỗ trợ cờ trợ giúp `-h` / `--help`.
 - **Giao diện điều hướng hiện đại:** Điều hướng bằng phím mũi tên `↑` / `↓` mượt mà qua Bubble Tea.
 - **Live Dashboard:** Theo dõi tiến độ, tốc độ truyền tải của từng luồng theo thời gian thực trên terminal.
 
@@ -46,7 +47,7 @@ Mở PowerShell và chạy lệnh:
 irm https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.ps1 | iex
 ```
 
-> **Lưu ý:** Script cài đặt hoàn toàn độc lập, không yêu cầu cài đặt Go compiler. Script sẽ tự động nhận diện hệ điều hành, tự cài đặt các phụ thuộc (`rsync`, `sshpass`), tải bản binary phù hợp từ GitHub Releases/kho lưu trữ và tự cấu hình biến môi trường `PATH`.
+> **Lưu ý:** Script cài đặt hoàn toàn độc lập, không yêu cầu cài đặt Go compiler. Script cho phép lựa chọn ngôn ngữ (tiếng Anh hoặc tiếng Việt), tự lưu cấu hình vào `~/.config/xsync/config.ini`, tự cài đặt các phụ thuộc (`rsync`, `sshpass`), tải bản binary phù hợp từ GitHub Releases/kho lưu trữ và tự cấu hình biến môi trường `PATH`.
 
 ---
 
@@ -92,7 +93,20 @@ scripts/train.py
 Sau khi cài đặt xong, bạn có thể gọi lệnh `xsync` tại bất kỳ thư mục nào:
 
 ```bash
+# Khởi chạy giao diện tương tác
 xsync
+
+# Xem hướng dẫn trợ giúp theo ngôn ngữ đã lưu
+xsync -h
+xsync --help
+
+# Chạy với ngôn ngữ khác tạm thời
+xsync --lang en -h
+xsync --lang vi
+
+# Thay đổi ngôn ngữ mặc định toàn cục
+xsync --set-lang en
+xsync --set-lang vi
 ```
 
 Giao diện tương tác sẽ hướng dẫn bạn từng bước:

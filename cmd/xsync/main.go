@@ -13,11 +13,14 @@ import (
 	"golang.org/x/term"
 
 	"xsync/internal/config"
+	"xsync/internal/i18n"
 	"xsync/internal/parallel"
 	"xsync/internal/pathutils"
 	"xsync/internal/sync"
 	"xsync/internal/tui"
 )
+
+const Version = "1.0.1"
 
 func migrateOldConfigs(configDir string) {
 	migrations := [][2]string{
@@ -34,7 +37,7 @@ func migrateOldConfigs(configDir string) {
 		if _, err := os.Stat(oldPath); err == nil {
 			if _, errNew := os.Stat(newPath); os.IsNotExist(errNew) {
 				if err := os.Rename(oldPath, newPath); err == nil {
-					tui.PrintInfo(fmt.Sprintf("Da tu dong di tru %s sang %s", m[0], m[1]))
+					tui.PrintInfo(i18n.TF("migrated_config", m[0], m[1]))
 				}
 			}
 		}
@@ -42,18 +45,11 @@ func migrateOldConfigs(configDir string) {
 }
 
 func main() {
-	// 1. Kiem tra phu thuoc he thong (Fatal Error neu thieu)
-	if err := sync.CheckDependencies(); err != nil {
-		os.Exit(1)
-	}
-
 	configDir, err := os.Getwd()
 	if err != nil {
-		tui.PrintErr(fmt.Sprintf("Khong the lay thu muc hien tai: %v", err))
+		tui.PrintErr(fmt.Sprintf("Cannot get current directory: %v", err))
 		os.Exit(1)
 	}
-
-	migrateOldConfigs(configDir)
 
 	envFilePath := filepath.Join(configDir, "xsync.ini")
 	if !fileExists(envFilePath) {
@@ -63,14 +59,64 @@ func main() {
 		}
 	}
 
+	// Load saved language from environment, local xsync.ini, or global config
+	i18n.LoadSavedLanguage(envFilePath)
+
+	// Parse command line arguments and flags
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		switch arg {
+		case "-h", "--help", "help":
+			fmt.Println(i18n.T("help_usage"))
+			os.Exit(0)
+		case "-v", "--version", "version":
+			fmt.Printf(i18n.T("version_info"), Version)
+			os.Exit(0)
+		case "--lang":
+			if i+1 < len(os.Args) {
+				i18n.SetLanguage(os.Args[i+1])
+				i++
+			}
+		case "--set-lang":
+			if i+1 < len(os.Args) {
+				targetLang := os.Args[i+1]
+				if err := i18n.SaveGlobalLanguage(targetLang); err != nil {
+					tui.PrintErr(fmt.Sprintf("Failed to save language: %v", err))
+					os.Exit(1)
+				}
+				if i18n.GetLanguage() == i18n.LangEN {
+					tui.PrintOk(fmt.Sprintf("Default language saved: %s", targetLang))
+				} else {
+					tui.PrintOk(fmt.Sprintf("Đã lưu ngôn ngữ mặc định: %s", targetLang))
+				}
+				os.Exit(0)
+			}
+		default:
+			if strings.HasPrefix(arg, "--lang=") {
+				i18n.SetLanguage(strings.TrimPrefix(arg, "--lang="))
+			} else if strings.HasPrefix(arg, "--set-lang=") {
+				targetLang := strings.TrimPrefix(arg, "--set-lang=")
+				_ = i18n.SaveGlobalLanguage(targetLang)
+				os.Exit(0)
+			}
+		}
+	}
+
+	// 1. Kiem tra phu thuoc he thong (Fatal Error neu thieu)
+	if err := sync.CheckDependencies(); err != nil {
+		os.Exit(1)
+	}
+
+	migrateOldConfigs(configDir)
+
 	// 2. Tu dong tao xsync.ini neu chua ton tai va mo editor cho nguoi dung nhap
 	if !fileExists(envFilePath) {
-		tui.PrintWarn("Chua tim thay file xsync.ini tai thu muc hien tai.")
+		tui.PrintWarn(i18n.T("not_found_xsync_ini"))
 		_ = config.EnsureConfigFiles(configDir)
 		envFilePath = filepath.Join(configDir, "xsync.ini")
-		tui.PrintOk("Da tu dong tao file mau xsync.ini tai thu muc hien tai.")
-		tui.PrintInfo("Chuan bi mo xsync.ini trong trinh soan thao de ban khai bao SSH Host va REMOTE_DIR...")
-		fmt.Print("  An Enter de mo file cau hinh...")
+		tui.PrintOk(i18n.T("created_xsync_ini"))
+		tui.PrintInfo(i18n.T("prompt_open_xsync_ini"))
+		fmt.Print(i18n.T("press_enter_to_open_config"))
 		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 		_ = tui.OpenFileInEditor(envFilePath)
 	}
@@ -83,16 +129,16 @@ func main() {
 	for {
 		hosts := config.ParseSSHHosts()
 		if len(hosts) == 0 {
-			tui.PrintWarn("Khong tim thay SSH Host nao duoc cau hinh trong ~/.ssh/config.")
-			tui.PrintInfo("Chuan bi mo ~/.ssh/config de ban tu them Host...")
-			fmt.Print("  An Enter de mo file cau hinh SSH...")
+			tui.PrintWarn(i18n.T("no_ssh_host_found"))
+			tui.PrintInfo(i18n.T("prompt_open_ssh_config"))
+			fmt.Print(i18n.T("press_enter_to_open_ssh"))
 			_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 
 			home, _ := os.UserHomeDir()
 			sshConfigPath := filepath.Join(home, ".ssh", "config")
 			_ = os.MkdirAll(filepath.Dir(sshConfigPath), 0o700)
 			if _, err := os.Stat(sshConfigPath); os.IsNotExist(err) {
-				template := `# Vi du cau hinh SSH Host trong ~/.ssh/config
+				template := `# Example SSH Host in ~/.ssh/config
 # Host my-server
 #     HostName 192.168.1.100
 #     Port 22
@@ -105,10 +151,10 @@ func main() {
 			// Kiem tra lai sau khi sua
 			if len(config.ParseSSHHosts()) == 0 {
 				retryOpts := []string{
-					"Mo lai file ~/.ssh/config de them Host",
-					"Dung lai",
+					i18n.T("menu_reopen_ssh_config"),
+					i18n.T("menu_stop"),
 				}
-				cIdx := tui.PromptMenu("CHUA CO SSH HOST", retryOpts, 0)
+				cIdx := tui.PromptMenu(i18n.T("menu_no_ssh_host_title"), retryOpts, 0)
 				if cIdx == 1 {
 					os.Exit(0)
 				}
@@ -120,9 +166,9 @@ func main() {
 		for _, h := range hosts {
 			options = append(options, fmt.Sprintf("SSH Host: %s", h))
 		}
-		options = append(options, "Mo file ~/.ssh/config de tu them/sua SSH Host...")
-		options = append(options, "Mo file xsync.ini de tu sua thu muc REMOTE_DIR/REMOTE_PULL_DIR...")
-		options = append(options, "Thoat")
+		options = append(options, i18n.T("menu_open_ssh_config_opt"))
+		options = append(options, i18n.T("menu_open_xsync_ini_opt"))
+		options = append(options, i18n.T("menu_exit"))
 
 		defaultProfile := config.GetDefaultProfile(envFilePath)
 		defaultIdx := -1
@@ -135,18 +181,18 @@ func main() {
 			}
 		}
 
-		idx := tui.PromptMenu("CHON SSH PROFILE (tu ~/.ssh/config)", options, defaultIdx)
+		idx := tui.PromptMenu(i18n.T("menu_ssh_profile_title"), options, defaultIdx)
 		if idx < len(hosts) {
 			selectedProfile = hosts[idx]
 			_ = config.SetDefaultProfile(envFilePath, selectedProfile)
 			break
 		} else if idx == len(hosts) {
 			home, _ := os.UserHomeDir()
-			tui.PrintInfo("Dang mo file ~/.ssh/config trong trinh soan thao...")
+			tui.PrintInfo(i18n.T("opening_ssh_config"))
 			_ = tui.OpenFileInEditor(filepath.Join(home, ".ssh", "config"))
 			continue
 		} else if idx == len(hosts)+1 {
-			tui.PrintInfo("Dang mo file xsync.ini trong trinh soan thao...")
+			tui.PrintInfo(i18n.T("opening_xsync_ini"))
 			_ = tui.OpenFileInEditor(envFilePath)
 			continue
 		} else {
@@ -162,13 +208,13 @@ func main() {
 			break
 		}
 
-		tui.PrintWarn(fmt.Sprintf("Host '%s' chua duoc khai bao thu muc REMOTE_DIR hop le trong xsync.ini.", selectedProfile))
+		tui.PrintWarn(i18n.TF("warn_host_no_remote_dir", selectedProfile))
 		fixOpts := []string{
-			"Mo file xsync.ini trong trinh soan thao de dien REMOTE_DIR",
-			"Chon lai SSH Host khac",
-			"Dung lai",
+			i18n.T("menu_fill_remote_dir"),
+			i18n.T("menu_reselect_host"),
+			i18n.T("menu_stop"),
 		}
-		fIdx := tui.PromptMenu("CAU HINH THIEU REMOTE_DIR", fixOpts, 0)
+		fIdx := tui.PromptMenu(i18n.T("menu_missing_remote_dir_title"), fixOpts, 0)
 		if fIdx == 0 {
 			if _, exists := profiles[selectedProfile]; !exists {
 				_ = config.SaveProfile(envFilePath, selectedProfile, config.Profile{
@@ -185,7 +231,7 @@ func main() {
 		}
 	}
 
-	// 5. Thiet lap va kiem tra ket noi SSH Master Socket (Co vong lap thu lai neu sai password)
+	// 5. Thiet lap va kiem tra ket noi SSH Master Socket
 	controlPath := sync.GetSSHControlPath(selectedProfile)
 	cleanup := func() {
 		if selectedProfile != "" {
@@ -203,22 +249,22 @@ func main() {
 	}()
 
 	for {
-		tui.PrintInfo(fmt.Sprintf("Dang thiet lap ket noi SSH Master cho host '%s'...", selectedProfile))
+		tui.PrintInfo(i18n.TF("ssh_connecting", selectedProfile))
 		ok, errSSH := sync.SetupSSHMaster(selectedProfile, envVars.SSHPassword, controlPath)
 		if ok {
-			tui.PrintOk("Da thiet lap SSH Master thanh cong!")
+			tui.PrintOk(i18n.T("ssh_connected"))
 			break
 		}
 
-		tui.PrintErr(fmt.Sprintf("Khong the ket noi SSH toi host '%s': %s", selectedProfile, errSSH))
+		tui.PrintErr(i18n.TF("ssh_connect_failed", selectedProfile, errSSH))
 		authOpts := []string{
-			"Nhap mat khau SSH bang tay de thu lai",
-			"Mo file xsync.ini de kiem tra va sua lai cau hinh",
-			"Dung lai",
+			i18n.T("menu_enter_pwd_manually"),
+			i18n.T("menu_fix_xsync_ini"),
+			i18n.T("menu_stop"),
 		}
-		aIdx := tui.PromptMenu("LOI XAC THUC / KET NOI SSH", authOpts, 0)
+		aIdx := tui.PromptMenu(i18n.T("menu_ssh_auth_error_title"), authOpts, 0)
 		if aIdx == 0 {
-			fmt.Printf("  Nhap mat khau SSH cho '%s': ", selectedProfile)
+			fmt.Printf(i18n.T("prompt_enter_pwd"), selectedProfile)
 			pwdBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Println()
 			if err == nil {
@@ -257,11 +303,11 @@ func main() {
 
 	// 6. Menu lua chon che do dong bo
 	modes := []string{
-		"Day du lieu tu may len server  (PUSH)",
-		"Tai du lieu tu server ve may   (PULL)",
-		"Dung lai",
+		i18n.T("menu_mode_push"),
+		i18n.T("menu_mode_pull"),
+		i18n.T("menu_stop"),
 	}
-	modeIdx := tui.PromptMenu("CHON CHE DO DONG BO", modes, 0)
+	modeIdx := tui.PromptMenu(i18n.T("menu_sync_mode_title"), modes, 0)
 	if modeIdx == 2 {
 		os.Exit(0)
 	}
@@ -276,24 +322,24 @@ func main() {
 	var srcPath, destPath string
 
 	if syncMode == "push" {
-		actionTitle = "CHUAN BI DAY DU LIEU LEN SERVER"
-		actionStart = "BAT DAU DAY DU LIEU"
-		actionDone = "HOAN TAT DAY DU LIEU!"
-		actionFail = "Day du lieu that bai. Kiem tra ket noi SSH va duong dan."
+		actionTitle = i18n.T("title_push_prepare")
+		actionStart = i18n.T("title_push_start")
+		actionDone = i18n.T("title_push_done")
+		actionFail = i18n.T("title_push_fail")
 		srcPath = configDir + "/"
 		destPath = fmt.Sprintf("%s:%s/", selectedProfile, strings.TrimRight(envVars.RemoteDir, "/"))
 
 		deleteOpts := []string{
-			"Co  (Xoa file tren Server neu khong co trong danh sach push)",
-			"Khong (Giu lai file tren Server)",
+			i18n.T("menu_delete_yes"),
+			i18n.T("menu_delete_no"),
 		}
-		delIdx := tui.PromptMenu("CO DUNG FLAG --delete?", deleteOpts, 1)
+		delIdx := tui.PromptMenu(i18n.T("menu_delete_flag_title"), deleteOpts, 1)
 		deleteEnabled = (delIdx == 0)
 	} else {
-		actionTitle = "CHUAN BI TAI DU LIEU TU SERVER VE MAY"
-		actionStart = "BAT DAU TAI DU LIEU"
-		actionDone = "HOAN TAT TAI DU LIEU!"
-		actionFail = "Tai du lieu that bai. Kiem tra ket noi SSH va duong dan."
+		actionTitle = i18n.T("title_pull_prepare")
+		actionStart = i18n.T("title_pull_start")
+		actionDone = i18n.T("title_pull_done")
+		actionFail = i18n.T("title_pull_fail")
 		srcPath = fmt.Sprintf("%s:%s/", selectedProfile, strings.TrimRight(envVars.RemoteDir, "/"))
 		destPath = configDir
 	}
@@ -306,11 +352,11 @@ func main() {
 	whitelistFilePath := filepath.Join(configDir, whitelistFileName)
 
 	if !fileExists(whitelistFilePath) {
-		tui.PrintWarn(fmt.Sprintf("Chua tim thay %s tai thu muc hien tai.", whitelistFileName))
+		tui.PrintWarn(i18n.TF("warn_whitelist_not_found", whitelistFileName))
 		_ = config.EnsureConfigFiles(configDir)
-		tui.PrintOk(fmt.Sprintf("Da tu dong tao file mau %s.", whitelistFileName))
-		tui.PrintInfo(fmt.Sprintf("Chuan bi mo %s trong trinh soan thao de ban nhap danh sach...", whitelistFileName))
-		fmt.Print("  An Enter de mo file...")
+		tui.PrintOk(i18n.TF("ok_created_whitelist", whitelistFileName))
+		tui.PrintInfo(i18n.TF("info_open_whitelist", whitelistFileName))
+		fmt.Print(i18n.T("press_enter_to_open_file"))
 		_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
 		_ = tui.OpenFileInEditor(whitelistFilePath)
 	}
@@ -325,12 +371,12 @@ func main() {
 	for {
 		data, err := os.ReadFile(whitelistFilePath)
 		if err != nil {
-			tui.PrintWarn(fmt.Sprintf("Khong the doc file %s. Se dong bo toan bo thu muc.", whitelistFileName))
+			tui.PrintWarn(i18n.TF("cannot_read_whitelist", whitelistFileName))
 			break
 		}
 
 		lines := strings.Split(string(data), "\n")
-		// Xử lý và kiểm tra tính hợp lệ của đường dẫn (Cảnh báo non-fatal nếu đường dẫn local không tồn tại)
+		// Xử lý và kiểm tra tính hợp lệ của đường dẫn
 		processRes := pathutils.ProcessIncludePathsWithValidation(lines, syncMode, configDir, envVars.RemoteDir)
 
 		for _, w := range processRes.Warnings {
@@ -344,19 +390,19 @@ func main() {
 				_, _ = tmpF.WriteString(strings.Join(rules, "\n") + "\n")
 				tmpF.Close()
 				generatedFilterFile = tmpF.Name()
-				tui.PrintOk(fmt.Sprintf("Da ap dung whitelist %s (%d quy tac)", syncMode, len(processRes.ValidPaths)))
+				tui.PrintOk(i18n.TF("applied_whitelist", syncMode, len(processRes.ValidPaths)))
 			}
 			break
 		} else {
-			tui.PrintWarn(fmt.Sprintf("Whitelist %s khong co muc hop le nao.", syncMode))
+			tui.PrintWarn(i18n.TF("warn_empty_whitelist", syncMode))
 			emptyOpts := []string{
-				"Tiep tuc dong bo TOAN BO thu muc",
-				fmt.Sprintf("Mo lai file %s de nhap danh sach", whitelistFileName),
-				"Dung lai",
+				i18n.T("menu_sync_all_folder"),
+				i18n.TF("menu_reopen_whitelist", whitelistFileName),
+				i18n.T("menu_stop"),
 			}
-			eIdx := tui.PromptMenu("WHITELIST TRONG", emptyOpts, 0)
+			eIdx := tui.PromptMenu(i18n.T("menu_empty_whitelist_title"), emptyOpts, 0)
 			if eIdx == 0 {
-				tui.PrintInfo(fmt.Sprintf("Che do: %s TOAN BO thu muc.", strings.ToUpper(syncMode)))
+				tui.PrintInfo(i18n.TF("sync_all_notice", strings.ToUpper(syncMode)))
 				break
 			} else if eIdx == 1 {
 				_ = tui.OpenFileInEditor(whitelistFilePath)
@@ -368,25 +414,25 @@ func main() {
 	}
 
 	tui.PrintHeader(actionTitle)
-	tui.PrintKV("Nguon", srcPath)
-	tui.PrintKV("Dich", destPath)
-	tui.PrintKV("SSH Host", selectedProfile)
-	tui.PrintKV("Config dir", configDir)
+	tui.PrintKV(i18n.T("kv_source"), srcPath)
+	tui.PrintKV(i18n.T("kv_dest"), destPath)
+	tui.PrintKV(i18n.T("kv_ssh_host"), selectedProfile)
+	tui.PrintKV(i18n.T("kv_config_dir"), configDir)
 
 	// 8. Chay Thu (Dry-Run)
-	tui.PrintHeader("DANG CHAY THU (DRY-RUN)")
+	tui.PrintHeader(i18n.T("header_dry_run"))
 	dryOk := sync.RunDryRun(syncMode, configDir, selectedProfile, envVars.RemoteDir, generatedFilterFile, deleteEnabled)
 	if !dryOk {
-		tui.PrintErr("Dry-run that bai. Vui long kiem tra SSH, quyen truy cap va duong dan remote.")
+		tui.PrintErr(i18n.T("dry_run_failed"))
 		os.Exit(1)
 	}
 
 	// 9. Xac nhan thuc thi
 	confirmOpts := []string{
-		"Tiep tuc (chay THAT)",
-		"Dung lai",
+		i18n.T("menu_confirm_continue"),
+		i18n.T("menu_stop"),
 	}
-	confIdx := tui.PromptMenu("XAC NHAN CHAY THAT", confirmOpts, 0)
+	confIdx := tui.PromptMenu(i18n.T("menu_confirm_run_title"), confirmOpts, 0)
 	if confIdx == 1 {
 		os.Exit(0)
 	}
@@ -409,13 +455,13 @@ func main() {
 
 		if envFromTUI {
 			saveItems := []tui.ChecklistItem{
-				{Key: "env", Label: "Luu mat khau SSH vua nhap vao xsync.ini", Checked: true},
+				{Key: "env", Label: i18n.T("save_password_label"), Checked: true},
 			}
-			selectedSaves := tui.PromptChecklist("LUU MAT KHAU", saveItems)
+			selectedSaves := tui.PromptChecklist(i18n.T("menu_save_password_title"), saveItems)
 			for _, s := range selectedSaves {
 				if s == "env" {
 					_ = config.SaveProfile(envFilePath, selectedProfile, envVars)
-					tui.PrintOk(fmt.Sprintf("Da luu mat khau cho profile '%s' vao xsync.ini", selectedProfile))
+					tui.PrintOk(i18n.TF("saved_password_success", selectedProfile))
 				}
 			}
 		}

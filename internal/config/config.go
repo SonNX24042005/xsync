@@ -246,6 +246,31 @@ func SetDefaultProfile(iniPath string, profileName string) error {
 	return writeIniFile(iniPath, data)
 }
 
+// GetLanguage retrieves language from [settings].
+func GetLanguage(iniPath string) string {
+	data, err := parseIniFile(iniPath)
+	if err != nil {
+		return ""
+	}
+	if settings, exists := data.Sections["settings"]; exists {
+		return settings["language"]
+	}
+	return ""
+}
+
+// SetLanguage writes language under [settings].
+func SetLanguage(iniPath string, lang string) error {
+	data, _ := parseIniFile(iniPath)
+
+	if _, exists := data.Sections["settings"]; !exists {
+		data.Sections["settings"] = make(map[string]string)
+		data.Order = append(data.Order, "settings")
+	}
+
+	data.Sections["settings"]["language"] = lang
+	return writeIniFile(iniPath, data)
+}
+
 // EnsureConfigFiles checks and creates xsync.ini, xsync.push.ini, and xsync.pull.ini in configDir if they don't exist.
 func EnsureConfigFiles(configDir string) []string {
 	var created []string

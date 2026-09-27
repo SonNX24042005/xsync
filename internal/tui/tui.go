@@ -10,6 +10,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"xsync/internal/i18n"
 )
 
 // Lipgloss styles
@@ -150,17 +152,24 @@ func (m menuModel) View() string {
 		return ""
 	}
 
+	helpText := "  (Dung phim mui ten ↑ / ↓ de di chuyen, Enter de chon)"
+	defaultSuffix := " (Mac dinh)"
+	if i18n.GetLanguage() == i18n.LangEN {
+		helpText = "  (Use ↑ / ↓ arrow keys to move, Enter to select)"
+		defaultSuffix = " (Default)"
+	}
+
 	var sb strings.Builder
 	sb.WriteString("\n")
 	sb.WriteString(headerStyle.Render(fmt.Sprintf("=== %s ===", m.title)))
 	sb.WriteString("\n")
-	sb.WriteString(helpStyle.Render("  (Dung phim mui ten ↑ / ↓ de di chuyen, Enter de chon)"))
+	sb.WriteString(helpStyle.Render(helpText))
 	sb.WriteString("\n\n")
 
 	for i, opt := range m.options {
 		suffix := ""
 		if m.defaultIdx >= 0 && i == m.defaultIdx {
-			suffix = " (Mac dinh)"
+			suffix = defaultSuffix
 		}
 
 		if m.cursor == i {
@@ -186,12 +195,20 @@ func PromptMenu(title string, options []string, defaultIdx int) int {
 
 	model := m.(menuModel)
 	if model.quitting || model.selected < 0 {
-		fmt.Println("\n  [INFO] Huy bo boi nguoi dung.")
+		cancelMsg := "Huy bo boi nguoi dung."
+		if i18n.GetLanguage() == i18n.LangEN {
+			cancelMsg = "Cancelled by user."
+		}
+		fmt.Printf("\n  [INFO] %s\n", cancelMsg)
 		os.Exit(130)
 	}
 
 	opt := options[model.selected]
-	fmt.Printf("\n  %s✔ Da chon:%s %s%s%s\n", COk, CReset, CBold, opt, CReset)
+	chosenLabel := "Da chon:"
+	if i18n.GetLanguage() == i18n.LangEN {
+		chosenLabel = "Selected:"
+	}
+	fmt.Printf("\n  %s✔ %s%s %s%s%s\n", COk, chosenLabel, CReset, CBold, opt, CReset)
 	return model.selected
 }
 
@@ -325,11 +342,20 @@ func (m checklistModel) View() string {
 		return ""
 	}
 
+	helpText := "  (Dung ↑ / ↓ de di chuyen, Space de bat/tat, Enter tren [Xac nhan] de luu)"
+	confirmText := "  ▸ [ ✔  Xac nhan va tiep tuc ]"
+	confirmInactiveText := "    [ ✔  Xac nhan va tiep tuc ]"
+	if i18n.GetLanguage() == i18n.LangEN {
+		helpText = "  (Use ↑ / ↓ to navigate, Space to toggle, Enter on [Confirm] to proceed)"
+		confirmText = "  ▸ [ ✔  Confirm and continue ]"
+		confirmInactiveText = "    [ ✔  Confirm and continue ]"
+	}
+
 	var sb strings.Builder
 	sb.WriteString("\n")
 	sb.WriteString(headerStyle.Render(fmt.Sprintf("=== %s ===", m.title)))
 	sb.WriteString("\n")
-	sb.WriteString(helpStyle.Render("  (Dung ↑ / ↓ de di chuyen, Space de bat/tat, Enter tren [Xac nhan] de luu)"))
+	sb.WriteString(helpStyle.Render(helpText))
 	sb.WriteString("\n\n")
 
 	for i, item := range m.items {
@@ -351,9 +377,9 @@ func (m checklistModel) View() string {
 	// Confirm button
 	sb.WriteString("\n")
 	if m.cursor == len(m.items) {
-		sb.WriteString(confirmActiveStyle.Render("  ▸ [ ✔  Xac nhan va tiep tuc ]"))
+		sb.WriteString(confirmActiveStyle.Render(confirmText))
 	} else {
-		sb.WriteString(confirmInactiveStyle.Render("    [ ✔  Xac nhan va tiep tuc ]"))
+		sb.WriteString(confirmInactiveStyle.Render(confirmInactiveText))
 	}
 	sb.WriteString("\n")
 
@@ -370,7 +396,11 @@ func PromptChecklist(title string, items []ChecklistItem) []string {
 
 	model := m.(checklistModel)
 	if model.quitting {
-		fmt.Println("\n  [INFO] Huy bo boi nguoi dung.")
+		cancelMsg := "Huy bo boi nguoi dung."
+		if i18n.GetLanguage() == i18n.LangEN {
+			cancelMsg = "Cancelled by user."
+		}
+		fmt.Printf("\n  [INFO] %s\n", cancelMsg)
 		os.Exit(130)
 	}
 
