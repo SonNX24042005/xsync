@@ -170,6 +170,9 @@ var translations = map[string]map[string]string{
 
 Cach su dung:
   xsync [flags]
+  xsync ui              Mo giao dien web local
+  xsync session new     Tao phien dong bo thu muc lien tuc
+  xsync session --help  Xem cac lenh quan ly phien
 
 Cac co (flags):
   -h, --help           Hien thi thong tin tro giup nay
@@ -266,6 +269,9 @@ Tai lieu va ma nguon:
 
 Usage:
   xsync [flags]
+  xsync ui              Open the local web interface
+  xsync session new     Create a continuous folder mirror session
+  xsync session --help  Show session management commands
 
 Flags:
   -h, --help           Show this help message

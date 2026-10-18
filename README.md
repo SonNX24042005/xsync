@@ -118,6 +118,58 @@ Giao diện tương tác sẽ hướng dẫn bạn từng bước:
 
 ---
 
-## 5. Tài liệu kỹ thuật
+## 5. Giao diện web local
+
+```bash
+xsync ui
+# Hoặc sau khi build trong dự án:
+./bin/xsync ui
+```
+
+Ứng dụng mở trình duyệt tại `127.0.0.1:8787`, với giao diện chọn server, SSH key/mật khẩu, duyệt thư mục local/remote, chọn dữ liệu, xem trước và quản lý phiên. Giao diện được đóng gói trong binary, không cần cài Node.js để sử dụng.
+
+- Nhấn **Tạo phiên mới** để chọn server → thư mục A/B → dữ liệu con → xác nhận.
+- Tạo phiên và xem chi tiết dùng trang chính với chữ, nút và khung thư mục lớn. Nút **Tạo thư mục** mở ô nhập ngay trong trình duyệt thư mục remote; chỉ thao tác nhập mật khẩu tạm mới dùng hộp thoại.
+- Trang **Máy chủ** hiển thị dấu **Đã dùng key** và **Đã lưu mật khẩu** cho từng host, đồng thời cho phép lưu/thay mật khẩu hoặc ngừng dùng mật khẩu cho kết nối mới. Mật khẩu từ `xsync.ini` và các phiên đã lưu cũng được nhận diện.
+- Nút **Kiểm tra key** xác thực SSH riêng, không phụ thuộc phiên bản rsync trên server. Kết nối bằng key trong trình tạo phiên cũng ghi nhớ xác thực thành công, kể cả khi bước kiểm tra rsync sau đó thất bại. Dấu key thể hiện lịch sử thành công, không bảo đảm server luôn kết nối được.
+- Nút **Kiểm tra kết nối** ưu tiên SSH key, rồi thử mật khẩu đã lưu nếu key không thành công. Kết quả báo riêng đăng nhập SSH và khả năng dùng rsync trên local/server; không tạo phiên hoặc đồng bộ dữ liệu. Cả hai nút kiểm tra đều có thể xác thực SSH khi local chưa có rsync.
+- Cấu hình máy chủ lưu tại `~/.config/xsync/servers.json` (quyền `600`, thư mục `700` trên Unix). Mật khẩu không được mã hóa; API đọc chỉ trả trạng thái và nguồn lưu. Cấu hình trên trang này ưu tiên hơn cấu hình cũ; ngừng dùng mật khẩu bỏ qua nguồn cũ cho kết nối mới, không xóa mật khẩu trong các phiên hoặc tệp cũ. Các phiên đã tạo giữ cấu hình xác thực riêng.
+- Trình duyệt thư mục có tìm kiếm tức thì, bộ nhớ đệm, nhập đường dẫn và tạo thư mục remote. Danh sách lớn chỉ vẽ các hàng đang được nhìn thấy.
+- Các phiên hiển thị trạng thái, thời điểm đồng bộ và log; có nút bắt đầu/dừng.
+- Bật **Tự chạy lại sau khi khởi động máy** để dùng dịch vụ hệ điều hành. Nếu bỏ chọn, phiên do tiến trình `xsync ui` quản lý; đóng tab vẫn đồng bộ, dừng tiến trình UI sẽ dừng các phiên tạm đó.
+- Không lưu mật khẩu vẫn có thể chạy phiên tạm; tự khởi động cần SSH key hoặc mật khẩu đã lưu.
+
+`xsync ui --port 0` chọn một cổng trống; `--no-open` chỉ in đường dẫn mà không mở trình duyệt. Khi mở lần đầu, dùng đường dẫn được lệnh in ra để xác thực giao diện. Máy chủ UI chỉ lắng nghe trên loopback và không cung cấp quyền truy cập qua mạng LAN.
+
+## 6. Phiên đồng bộ thư mục liên tục
+
+Chạy `xsync session new`, hoặc chọn **Phiên đồng bộ thư mục liên tục** trong menu `xsync`. Chế độ phiên cần rsync từ 3.1.3 ở cả local và server.
+
+1. Chọn server từ `~/.ssh/config` (hỗ trợ cả `Include`).
+2. Chọn SSH key/agent hoặc mật khẩu. Key không yêu cầu `sshpass`. Mật khẩu có thể được lưu trong cấu hình riêng của tài khoản để chạy nền; nếu không lưu thì phiên chạy trong terminal hiện tại.
+3. Chọn thư mục local **A** và thư mục chứa **B** trên server. Đích đồng bộ luôn là **B/A**, ví dụ `/home/me/project` → `server:/srv/backups/project/`.
+4. Chọn các file/thư mục con cần phản chiếu, hoặc chọn toàn bộ A. Các file mới trong thư mục đã chọn cũng được đồng bộ.
+5. Xem trước thay đổi, rồi xác nhận lưu và chạy nền. **Thao tác xóa trong phần dữ liệu đã chọn ở local cũng được áp dụng lên server.** Dữ liệu ngoài phần đã chọn được giữ lại.
+
+Trong giao diện duyệt thư mục: `↑`/`↓` di chuyển, `Enter` mở, `Backspace` lên thư mục cha, `/` tìm tức thì, `g` nhập đường dẫn, `r` tải lại, `q` hủy. Nhấn `Space` để chọn thư mục hiện tại trong bước chọn A/B. Khi chọn dữ liệu con, `Space` chọn/bỏ một mục, `a` chọn cả thư mục đang mở, `Tab` hoàn tất. Trên server có thêm `n` để tạo thư mục chứa mới. Danh sách remote được tải bất đồng bộ và lưu đệm khi quay lại.
+
+```bash
+xsync session list
+xsync session status <id>
+xsync session logs <id>
+xsync session preview <id>
+xsync session stop <id>    # Dừng dịch vụ và tắt tự khởi động
+xsync session select <id>  # Chọn lại dữ liệu khi phiên đã dừng
+xsync session start <id>   # Chạy nền và bật lại tự khởi động
+xsync session run <id>     # Chạy trong terminal; Ctrl+C để dừng
+```
+
+Trên Linux, phiên dùng dịch vụ systemd của tài khoản và bật linger để tự chạy khi boot, kể cả trước khi đăng nhập. Máy cần có systemd user manager; nếu tài khoản không có quyền bật linger, lệnh sẽ báo cách khắc phục và giữ lại cấu hình phiên. Trên macOS/Windows, phiên dùng LaunchAgent/Scheduled Task để tự chạy khi đăng nhập tài khoản. SSH key có passphrase cần agent đã mở khóa; để chạy trước đăng nhập cần một phương thức xác thực dùng được không tương tác.
+
+Cấu hình phiên nằm trong `~/.config/xsync/sessions/<id>/`. Mật khẩu được lưu dạng văn bản trong `session.json` với quyền `0600`, thư mục `0700` trên Unix; mật khẩu không được đặt trong dòng lệnh hay log. Xem [tài liệu phiên đồng bộ](docs/phien_dong_bo.md) để biết cơ chế theo dõi, phạm vi xóa và giới hạn nền tảng.
+
+## 7. Tài liệu kỹ thuật
 
 - [Các trường hợp xử lý ngoại lệ và lỗi trong xsync](docs/xu_ly_ngoai_le_va_loi.md)
+- [Cơ chế hoạt động](docs/co_che_hoat_dong.md)
+- [Phiên đồng bộ thư mục liên tục](docs/phien_dong_bo.md)

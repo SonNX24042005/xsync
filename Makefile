@@ -1,4 +1,4 @@
-.PHONY: all build install test clean run
+.PHONY: all build install test test-ui clean run
 
 BINARY_NAME=xsync
 BUILD_DIR=bin
@@ -21,6 +21,10 @@ install: build
 
 test:
 	go test -v ./...
+
+test-ui:
+	npm ci --prefix internal/webui/ui-tests --ignore-scripts --no-audit --no-fund
+	npm test --prefix internal/webui/ui-tests
 
 clean:
 	@rm -rf $(BUILD_DIR)

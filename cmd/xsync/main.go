@@ -16,8 +16,10 @@ import (
 	"xsync/internal/i18n"
 	"xsync/internal/parallel"
 	"xsync/internal/pathutils"
+	"xsync/internal/sessioncli"
 	"xsync/internal/sync"
 	"xsync/internal/tui"
+	"xsync/internal/webui"
 )
 
 const Version = "1.0.1"
@@ -52,6 +54,14 @@ func main() {
 	}
 
 	envFilePath := filepath.Join(configDir, "xsync.ini")
+	// Sessions have their own storage and must not scan the legacy project's tree.
+	i18n.LoadSavedLanguage(envFilePath)
+	if handled, code := webui.Dispatch(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+	if handled, code := sessioncli.Dispatch(os.Args[1:]); handled {
+		os.Exit(code)
+	}
 	if !fileExists(envFilePath) {
 		nearest := config.FindConfigNearest("xsync.ini", 8)
 		if nearest != "" {
@@ -63,6 +73,7 @@ func main() {
 	i18n.LoadSavedLanguage(envFilePath)
 
 	// Parse command line arguments and flags
+	showMenu := true
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		switch arg {
@@ -98,7 +109,34 @@ func main() {
 				targetLang := strings.TrimPrefix(arg, "--set-lang=")
 				_ = i18n.SaveGlobalLanguage(targetLang)
 				os.Exit(0)
+			} else {
+				showMenu = false
 			}
+		}
+	}
+
+	if showMenu {
+		choice := tui.PromptMenu(tui.Text("Chọn công việc", "Choose a task"), []string{
+			tui.Text("Đồng bộ một lần (push / pull)", "One-time sync (push / pull)"),
+			tui.Text("Phiên đồng bộ thư mục liên tục", "Continuous folder sync sessions"),
+			tui.Text("Mở giao diện web", "Open web interface"),
+			tui.Text("Thoát", "Exit"),
+		}, 0)
+		if choice == 3 {
+			return
+		}
+		if choice == 2 {
+			_, code := webui.Dispatch([]string{"ui"})
+			if code != 0 {
+				os.Exit(code)
+			}
+			return
+		}
+		if choice == 1 {
+			if err := sessioncli.Menu(); err != nil {
+				tui.PrintErr(err.Error())
+			}
+			return
 		}
 	}
 
