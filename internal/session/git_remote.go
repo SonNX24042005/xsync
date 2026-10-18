@@ -101,6 +101,48 @@ func (p *gitPlan) guardSelectionMoves(ctx context.Context, t *Transport, dry boo
 	return nil
 }
 
+// removableParents skips a path whose remote parent is already gone and refuses
+// to follow a symlinked parent out of the configured target.
+func removableParents(root, rel string) string {
+	var script strings.Builder
+	current := root
+	fmt.Fprintf(&script, "[ -d %s ] && [ ! -L %s ] || exit 71; ", ShellQuote(current), ShellQuote(current))
+	if parent := path.Dir(rel); parent != "." {
+		for _, part := range strings.Split(parent, "/") {
+			current = path.Join(current, part)
+			quoted := ShellQuote(current)
+			fmt.Fprintf(&script, "[ ! -L %s ] || exit 71; [ -d %s ] || exit 0; ", quoted, quoted)
+		}
+	}
+	return script.String()
+}
+
+// removeRemote deletes managed entries that disappeared locally. Directories are
+// removed only once empty, so remote data xsync does not manage is preserved.
+func (s *changeSet) removeRemote(ctx context.Context, t *Transport, root string) error {
+	items := make([]string, 0, len(s.RemoveFiles)+len(s.RemoveDirs))
+	for _, rel := range s.RemoveFiles {
+		target := ShellQuote(path.Join(root, rel))
+		items = append(items, "("+removableParents(root, rel)+"if [ -L "+target+" ] || { [ -e "+target+" ] && [ ! -d "+target+" ]; }; then rm -f -- "+target+" || exit; fi) || exit")
+	}
+	for _, rel := range s.RemoveDirs {
+		target := ShellQuote(path.Join(root, rel))
+		items = append(items, "("+removableParents(root, rel)+"if [ -d "+target+" ] && [ ! -L "+target+" ]; then rmdir -- "+target+" 2>/dev/null; fi; exit 0) || exit")
+	}
+	const batch = 100
+	for start := 0; start < len(items); start += batch {
+		end := min(start+batch, len(items))
+		reportProgress(ctx, Progress{Stage: "deleting", Checked: int64(start), Total: int64(len(items))})
+		if _, err := t.runWithTimeout(ctx, "sh -c "+ShellQuote(strings.Join(items[start:end], "; ")), 5*time.Minute); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("remote deletion failed: %w", err)
+		}
+	}
+	return nil
+}
+
 // Remote Git is unnecessary. Hash verification prevents moving a remotely modified file.
 func (p *gitPlan) moveRemote(ctx context.Context, t *Transport, dry bool) (string, error) {
 	if p == nil {

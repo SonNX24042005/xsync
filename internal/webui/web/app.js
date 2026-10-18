@@ -478,7 +478,7 @@ class Browser {
 function openDetails(id) { if (state.page === 'new') discardWizard(); state.detail = id; setPage('details'); renderDetail(); $('#details-title').focus(); refreshLogs().catch(err => toast(err.message, true)); }
 function syncProgress(session, detailed = false) {
   const p = session.status.progress; if (!p) return null;
-  const labels = { connecting: 'Đang kết nối', scanning: 'Đang quét thay đổi', renaming: 'Đang xử lý đổi tên', transferring: 'Đang đồng bộ', finishing: 'Đang hoàn tất', completed: 'Đã đồng bộ' };
+  const labels = { connecting: 'Đang kết nối', scanning: 'Đang quét thay đổi', renaming: 'Đang xử lý đổi tên', deleting: 'Đang xóa mục đã xóa', transferring: 'Đang đồng bộ', finishing: 'Đang hoàn tất', completed: 'Đã đồng bộ' };
   const interrupted = session.status.phase === 'retrying' || (!session.running && p.stage !== 'completed');
   const label = interrupted ? (session.running ? 'Chờ thử lại' : 'Đã dừng') : (labels[p.stage] || 'Đang chuẩn bị');
   const percent = Number.isFinite(p.percent) ? Math.max(0, Math.min(p.stage === 'completed' ? 100 : 99, p.percent)) : null;
@@ -495,7 +495,7 @@ function syncProgress(session, detailed = false) {
     parts.push(`${bytes.toLocaleString('vi-VN', { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]} đã xử lý`);
   }
   if (!interrupted && p.stage === 'transferring') { if (p.rate) parts.push(p.rate); if (p.eta) parts.push(`Còn khoảng ${p.eta}`); }
-  if (p.stage === 'renaming' && p.total > 0) parts.push(`${p.checked}/${p.total} mục`);
+  if ((p.stage === 'renaming' || p.stage === 'deleting') && p.total > 0) parts.push(`${p.checked}/${p.total} mục`);
   if (detailed && p.transfers > 0) parts.push(`${p.transfers} tệp đã truyền`);
   if (parts.length) box.append(el('small', 'progress-metrics', parts.join(' · ')));
   return box;

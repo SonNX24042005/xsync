@@ -448,7 +448,7 @@ func statusText(c session.Config) string {
 				fmt.Fprintf(&out, "%s: ~%s\n", tr("Thời gian còn lại", "Time remaining"), p.ETA)
 			}
 		}
-		if p.Stage == "renaming" {
+		if p.Stage == "renaming" || p.Stage == "deleting" {
 			fmt.Fprintf(&out, "%d/%d %s\n", p.Checked, p.Total, tr("mục", "items"))
 		}
 		if p.Transfers > 0 {
@@ -484,8 +484,9 @@ func scopeLabel(c session.Config) string {
 func progressSummary(p *session.Progress) string {
 	labels := map[string]string{
 		"connecting": tr("Đang kết nối", "Connecting"), "scanning": tr("Đang quét", "Scanning"),
-		"renaming": tr("Đang xử lý đổi tên", "Processing renames"), "transferring": tr("Đang đồng bộ", "Syncing"),
-		"finishing": tr("Đang hoàn tất", "Finishing"), "completed": tr("Đã đồng bộ", "Synced"),
+		"renaming": tr("Đang xử lý đổi tên", "Processing renames"), "deleting": tr("Đang xóa mục đã xóa", "Removing deleted items"),
+		"transferring": tr("Đang đồng bộ", "Syncing"), "finishing": tr("Đang hoàn tất", "Finishing"),
+		"completed": tr("Đã đồng bộ", "Synced"),
 	}
 	label := labels[p.Stage]
 	if p.Percent != nil {

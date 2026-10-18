@@ -495,13 +495,105 @@ func (p *gitPlan) unchanged() (bool, error) {
 	return true, nil
 }
 
-func (p *gitPlan) beginTransfer() error {
+// transferMarker survives a failed attempt. Incremental attempts record their
+// paths so a retry re-checks exactly those paths, even after a local revert.
+// Markers without Incremental (including older ones) force a full pass.
+type transferMarker struct {
+	Identity    string   `json:"identity"`
+	Incremental bool     `json:"incremental,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	Dirs        []string `json:"dirs,omitempty"`
+}
+
+// changeSet lists the managed paths an incremental pass touches.
+type changeSet struct {
+	Transfer    []string // added or modified entries, sent with --files-from
+	RemoveFiles []string // removed files, symlinks and special entries
+	RemoveDirs  []string // removed directories, deepest first
+}
+
+// changes returns the paths that differ from the synced baseline, or nil when a
+// full rsync pass is required (first sync, selection change, pending selection
+// move, type change or an attempt that was not incremental).
+func (p *gitPlan) changes() (*changeSet, error) {
+	if p == nil || p.repo == "" || p.before == nil || p.before.Identity != p.after.Identity ||
+		len(p.cleanup) > 0 || p.before.RootMetadata != p.after.RootMetadata {
+		return nil, nil
+	}
+	if _, err := os.Lstat(p.pendingPath()); err == nil {
+		return nil, nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	paths, dirs := make(map[string]bool), make(map[string]bool)
+	if data, err := os.ReadFile(p.transferPendingPath()); err == nil {
+		var marker transferMarker
+		if json.Unmarshal(data, &marker) != nil || !marker.Incremental || marker.Identity != p.after.Identity {
+			return nil, nil
+		}
+		for _, rel := range marker.Paths {
+			paths[rel] = true
+		}
+		for _, rel := range marker.Dirs {
+			paths[rel], dirs[rel] = true, true
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	for rel, next := range p.after.Entries {
+		old, ok := p.before.Entries[rel]
+		if ok && old.Kind != next.Kind {
+			// A file replaced by a directory (or the reverse) needs rsync's full deletion rules.
+			return nil, nil
+		}
+		if !ok || old.Hash != next.Hash || old.Executable != next.Executable || old.Metadata != next.Metadata {
+			paths[rel] = true
+		}
+	}
+	for rel, old := range p.before.Entries {
+		if _, ok := p.after.Entries[rel]; !ok {
+			paths[rel] = true
+			if old.Kind == "directory" {
+				dirs[rel] = true
+			}
+		}
+	}
+	set := &changeSet{}
+	for rel := range paths {
+		if _, ok := p.after.Entries[rel]; ok {
+			set.Transfer = append(set.Transfer, rel)
+		} else if dirs[rel] {
+			set.RemoveDirs = append(set.RemoveDirs, rel)
+		} else {
+			set.RemoveFiles = append(set.RemoveFiles, rel)
+		}
+	}
+	sort.Strings(set.Transfer)
+	sort.Strings(set.RemoveFiles)
+	// Children sort after their parents, so reverse order removes the deepest directories first.
+	sort.Sort(sort.Reverse(sort.StringSlice(set.RemoveDirs)))
+	return set, nil
+}
+
+func (p *gitPlan) beginTransfer(set *changeSet) error {
 	if p == nil || p.repo == "" {
 		return nil
 	}
 	// Keep a durable retry marker before any remote mutation. Local changes may
 	// revert to the previous baseline after a failed or interrupted transfer.
-	return writeJSON(p.transferPendingPath(), map[string]string{"identity": p.after.Identity})
+	marker := transferMarker{Identity: p.after.Identity}
+	if set != nil {
+		marker.Incremental = true
+		for _, rel := range append(append([]string(nil), set.Transfer...), set.RemoveFiles...) {
+			if p.after.Entries[rel].Kind == "directory" {
+				marker.Dirs = append(marker.Dirs, rel)
+			} else {
+				marker.Paths = append(marker.Paths, rel)
+			}
+		}
+		marker.Dirs = append(marker.Dirs, set.RemoveDirs...)
+	}
+	return writeJSON(p.transferPendingPath(), marker)
 }
 
 func (p *gitPlan) completeTransfer() error {

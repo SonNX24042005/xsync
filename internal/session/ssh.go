@@ -255,8 +255,14 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 		}
 	}
 	checksum := plan.needsChecksum()
+	// An incremental pass hands rsync only the paths Git reports as changed, so
+	// unchanged data is neither walked nor counted in progress.
+	var changes *changeSet
 	if !dry {
-		if err := plan.beginTransfer(); err != nil {
+		if changes, err = plan.changes(); err != nil {
+			return "", err
+		}
+		if err := plan.beginTransfer(changes); err != nil {
 			return "", err
 		}
 	}
@@ -284,8 +290,57 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 			return prefix, err
 		}
 	}
-	args := []string{"-az", "--modify-window=-1", "--protect-args", "--delete-delay", "--partial", "--timeout=60",
+	var stream *progressOutput
+	text := ""
+	if changes != nil {
+		if err := changes.removeRemote(ctx, t, c.Target()); err != nil {
+			return prefix, err
+		}
+	}
+	if changes == nil || len(changes.Transfer) > 0 {
+		stream, text, err = t.rsync(ctx, c, effective, checksum, dry, changes)
+		if err != nil {
+			return prefix + text, err
+		}
+	}
+	if !dry {
+		var finalizing Progress
+		if stream != nil {
+			finalizing = stream.last
+		}
+		finalizing.Stage, finalizing.Rate, finalizing.ETA = "finishing", "", ""
+		reportProgress(ctx, finalizing)
+		if err := plan.finish(ctx); err != nil {
+			return prefix + text, err
+		}
+		if err := plan.completeTransfer(); err != nil {
+			return prefix + text, err
+		}
+	}
+	return prefix + text, nil
+}
+
+// rsync mirrors the whole effective selection, or with changes only the listed paths.
+func (t *Transport) rsync(ctx context.Context, c, effective Config, checksum, dry bool, changes *changeSet) (*progressOutput, string, error) {
+	args := []string{"-az", "--modify-window=-1", "--protect-args", "--partial", "--timeout=60",
 		"--itemize-changes", "--out-format=%i %n%L", "-e", t.RsyncShell()}
+	if changes == nil {
+		args = append(args, "--delete-delay")
+	} else {
+		// Incremental deletions already ran over SSH, so rsync never prunes beyond the listed paths.
+		// Scanning rejects newlines in paths. The "./" prefix keeps names that
+		// start with '#' or ';' from being read as comments.
+		paths := make([]string, len(changes.Transfer))
+		for i, rel := range changes.Transfer {
+			paths[i] = "./" + rel
+		}
+		list, err := tempList(paths)
+		if err != nil {
+			return nil, "", err
+		}
+		defer os.Remove(list)
+		args = append(args, "--files-from="+rsyncLocalPath(list))
+	}
 	if checksum {
 		args = append(args, "--checksum")
 	}
@@ -295,20 +350,12 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 		args = append(args, "--info=progress2", "--outbuf=L", "--no-human-readable")
 	}
 	if rules := effective.Filters(); len(rules) > 0 {
-		f, err := os.CreateTemp("", "xsync-filter-")
+		filter, err := tempList(rules)
 		if err != nil {
-			return "", err
+			return nil, "", err
 		}
-		defer os.Remove(f.Name())
-		_, err = f.WriteString(strings.Join(rules, "\n") + "\n")
-		closeErr := f.Close()
-		if err != nil {
-			return "", err
-		}
-		if closeErr != nil {
-			return "", closeErr
-		}
-		args = append(args, "--filter=merge "+rsyncLocalPath(f.Name()))
+		defer os.Remove(filter)
+		args = append(args, "--filter=merge "+rsyncLocalPath(filter))
 	}
 	source := rsyncLocalPath(c.LocalDir) + "/"
 	args = append(args, "--", source, c.Host+":"+c.Target()+"/")
@@ -324,27 +371,33 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 	stream := &progressOutput{ctx: ctx, log: out}
 	cmd.Stdout, cmd.Stderr = stream, stream
 	reportProgress(ctx, Progress{Stage: "transferring"})
-	err = cmd.Run()
+	err := cmd.Run()
 	stream.flush()
 	text := out.String()
 	if t.Password != "" {
 		text = strings.ReplaceAll(text, t.Password, "[redacted]")
 	}
 	if err != nil {
-		return prefix + text, fmt.Errorf("rsync: %w: %s", err, text)
+		return stream, text, fmt.Errorf("rsync: %w: %s", err, text)
 	}
-	if !dry {
-		finalizing := stream.last
-		finalizing.Stage, finalizing.Rate, finalizing.ETA = "finishing", "", ""
-		reportProgress(ctx, finalizing)
-		if err := plan.finish(ctx); err != nil {
-			return prefix + text, err
-		}
-		if err := plan.completeTransfer(); err != nil {
-			return prefix + text, err
-		}
+	return stream, text, nil
+}
+
+func tempList(items []string) (string, error) {
+	f, err := os.CreateTemp("", "xsync-list-")
+	if err != nil {
+		return "", err
 	}
-	return prefix + text, nil
+	_, err = f.WriteString(strings.Join(items, "\n") + "\n")
+	closeErr := f.Close()
+	if err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 func rsyncLocalPath(name string) string {
