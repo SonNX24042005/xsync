@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Script cài đặt xsync (Parallel rsync CLI / TUI)
+# Script cài đặt bản phát hành xsync mới nhất
 # Cách dùng:
 #   curl -fsSL https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.sh | bash
 # Hoặc chạy cục bộ:
@@ -86,8 +86,6 @@ if [ "${CHOSEN_LANG}" = "en" ]; then
     MSG_ALL_DEPS_READY="All dependencies (rsync, sshpass) are ready!"
     MSG_CHECK_RELEASES="Checking releases on GitHub Releases..."
     MSG_RELEASE_INSTALLED="Installed binary from GitHub Releases successfully!"
-    MSG_LOCAL_BIN_FOUND="Detected existing binary at bin/xsync. Copying..."
-    MSG_LOCAL_BIN_INSTALLED="Installed existing binary to"
     MSG_BUILD_SUCCESS="Compiled and installed binary successfully!"
     MSG_INSTALL_SUCCESS="xsync installed successfully at:"
     MSG_USAGE_TITLE="How to use:"
@@ -99,8 +97,6 @@ else
     MSG_ALL_DEPS_READY="Tất cả phụ thuộc (rsync, sshpass) đã sẵn sàng!"
     MSG_CHECK_RELEASES="Kiểm tra bản phát hành trên GitHub Releases..."
     MSG_RELEASE_INSTALLED="Đã cài đặt bản nhị phân từ GitHub Releases thành công!"
-    MSG_LOCAL_BIN_FOUND="Phát hiện tệp binary có sẵn tại bin/xsync. Đang sao chép..."
-    MSG_LOCAL_BIN_INSTALLED="Đã cài đặt bản nhị phân có sẵn vào"
     MSG_BUILD_SUCCESS="Đã biên dịch và cài đặt binary thành công!"
     MSG_INSTALL_SUCCESS="Cài đặt xsync thành công tại:"
     MSG_USAGE_TITLE="Cách sử dụng:"
@@ -242,86 +238,74 @@ TMP_DIR="$(mktemp -d)"
 
 cleanup() {
     rm -rf "${TMP_DIR}"
+    if [ -n "${STAGED_PATH:-}" ]; then
+        rm -f "${STAGED_PATH}"
+    fi
 }
 trap cleanup EXIT
 
 INSTALLED=0
 
-# 4. Chiến lược cài đặt binary
+# 4. Ưu tiên bản phát hành, không dùng binary cũ trong thư mục hiện tại.
 echo ""
 
-# Chiến lược 1: Sử dụng binary hoặc mã nguồn cục bộ nếu đang ở trong thư mục dự án
-if [ -f "bin/xsync" ] && [ "${OS}" = "linux" ] && [ "${ARCH}" = "amd64" ]; then
-    info "${MSG_LOCAL_BIN_FOUND}"
-    rm -f "${TARGET_PATH}"
-    cp bin/xsync "${TARGET_PATH}"
-    chmod +x "${TARGET_PATH}"
-    ok "${MSG_LOCAL_BIN_INSTALLED} ${TARGET_PATH}!"
+STAGED_PATH=""
+install_binary() {
+    local candidate="$1"
+    chmod +x "${candidate}" || return 1
+    if ! "${candidate}" --version >/dev/null 2>&1; then
+        warn "Downloaded or built executable cannot run on this machine."
+        return 1
+    fi
+    STAGED_PATH="$(mktemp "${INSTALL_DIR}/.xsync-install.XXXXXX")" || return 1
+    if ! cp "${candidate}" "${STAGED_PATH}" || ! chmod 755 "${STAGED_PATH}" || ! mv -f "${STAGED_PATH}" "${TARGET_PATH}"; then
+        rm -f "${STAGED_PATH}"
+        STAGED_PATH=""
+        return 1
+    fi
+    STAGED_PATH=""
     INSTALLED=1
-elif [ -f "cmd/xsync/main.go" ] && command -v go >/dev/null 2>&1; then
-    rm -f "${TARGET_PATH}"
-    go build -ldflags="-s -w" -o "${TARGET_PATH}" ./cmd/xsync
-    if [ -f "${TARGET_PATH}" ]; then
-        chmod +x "${TARGET_PATH}"
-        ok "${MSG_BUILD_SUCCESS}"
-        INSTALLED=1
+}
+
+RELEASE_TAR="https://github.com/${REPO}/releases/latest/download/xsync_${OS}_${ARCH}.tar.gz"
+RELEASE_BIN="https://github.com/${REPO}/releases/latest/download/xsync_${OS}_${ARCH}"
+info "${MSG_CHECK_RELEASES}"
+if curl -fsSL --retry 2 "${RELEASE_TAR}" -o "${TMP_DIR}/release.tar.gz"; then
+    if tar -xzf "${TMP_DIR}/release.tar.gz" -C "${TMP_DIR}" "${BINARY_NAME}" && [ -f "${TMP_DIR}/${BINARY_NAME}" ]; then
+        if install_binary "${TMP_DIR}/${BINARY_NAME}"; then
+            ok "${MSG_RELEASE_INSTALLED}"
+        fi
+    fi
+fi
+if [ ${INSTALLED} -eq 0 ]; then
+    if curl -fsSL --retry 2 "${RELEASE_BIN}" -o "${TMP_DIR}/release-binary"; then
+        if install_binary "${TMP_DIR}/release-binary"; then
+            ok "${MSG_RELEASE_INSTALLED}"
+        fi
     fi
 fi
 
-# Chiến lược 2: Tải pre-built binary từ GitHub Releases (khi chạy qua curl từ xa)
-if [ ${INSTALLED} -eq 0 ]; then
-    RELEASE_TAR="https://github.com/${REPO}/releases/latest/download/xsync_${OS}_${ARCH}.tar.gz"
-    RELEASE_BIN="https://github.com/${REPO}/releases/latest/download/xsync_${OS}_${ARCH}"
-
-    info "${MSG_CHECK_RELEASES}"
-    if curl -fsSL -I "${RELEASE_TAR}" >/dev/null 2>&1; then
-        if curl -fsSL "${RELEASE_TAR}" | tar -xz -C "${TMP_DIR}" 2>/dev/null; then
-            if [ -f "${TMP_DIR}/${BINARY_NAME}" ]; then
-                rm -f "${TARGET_PATH}"
-                mv "${TMP_DIR}/${BINARY_NAME}" "${TARGET_PATH}"
-                chmod +x "${TARGET_PATH}"
-                ok "${MSG_RELEASE_INSTALLED}"
-                INSTALLED=1
+# Chỉ build từ nguồn khi không tải được release và đã có Go.
+if [ ${INSTALLED} -eq 0 ] && command -v go >/dev/null 2>&1; then
+    if [ -f "cmd/xsync/main.go" ]; then
+        if go build -ldflags="-s -w" -o "${TMP_DIR}/built-xsync" ./cmd/xsync; then
+            if install_binary "${TMP_DIR}/built-xsync"; then
+                ok "${MSG_BUILD_SUCCESS}"
             fi
         fi
-    elif curl -fsSL -I "${RELEASE_BIN}" >/dev/null 2>&1; then
-        if curl -fsSL "${RELEASE_BIN}" -o "${TARGET_PATH}"; then
-            chmod +x "${TARGET_PATH}"
-            ok "${MSG_RELEASE_INSTALLED}"
-            INSTALLED=1
-        fi
-    fi
-fi
-
-# Chiến lược 3: Tải binary nhánh main từ GitHub nếu chưa có release
-if [ ${INSTALLED} -eq 0 ] && [ "${OS}" = "linux" ] && [ "${ARCH}" = "amd64" ]; then
-    RAW_URL="https://raw.githubusercontent.com/${REPO}/main/bin/xsync"
-    if curl -fsSL "${RAW_URL}" -o "${TARGET_PATH}" 2>/dev/null; then
-        chmod +x "${TARGET_PATH}"
-        if [ -s "${TARGET_PATH}" ] && head -c 4 "${TARGET_PATH}" | grep -q "ELF"; then
-            ok "${MSG_LOCAL_BIN_INSTALLED} ${TARGET_PATH}!"
-            INSTALLED=1
-        else
-            rm -f "${TARGET_PATH}"
-        fi
-    fi
-fi
-
-# Chiến lược 4: Fallback clone và tự biên dịch nếu máy có sẵn Go
-if [ ${INSTALLED} -eq 0 ] && command -v go >/dev/null 2>&1; then
-    git clone --depth 1 "https://github.com/${REPO}.git" "${TMP_DIR}/src" >/dev/null 2>&1 || true
-    if [ -f "${TMP_DIR}/src/cmd/xsync/main.go" ]; then
-        (cd "${TMP_DIR}/src" && go build -ldflags="-s -w" -o "${TARGET_PATH}" ./cmd/xsync)
-        if [ -f "${TARGET_PATH}" ]; then
-            chmod +x "${TARGET_PATH}"
-            ok "${MSG_BUILD_SUCCESS}"
-            INSTALLED=1
+    elif command -v git >/dev/null 2>&1; then
+        if git clone --depth 1 "https://github.com/${REPO}.git" "${TMP_DIR}/src"; then
+            if (cd "${TMP_DIR}/src" && go build -ldflags="-s -w" -o "${TMP_DIR}/built-xsync" ./cmd/xsync); then
+                if install_binary "${TMP_DIR}/built-xsync"; then
+                    ok "${MSG_BUILD_SUCCESS}"
+                fi
+            fi
         fi
     fi
 fi
 
 if [ ${INSTALLED} -eq 0 ]; then
-    err "Unable to download or build xsync binary."
+    err "Unable to download or build xsync. The existing installation has been preserved."
     exit 1
 fi
 
@@ -358,10 +342,16 @@ fi
 
 echo ""
 ok "${MSG_INSTALL_SUCCESS} ${TARGET_PATH}"
+"${TARGET_PATH}" --version
+RESOLVED_XSYNC="$(command -v xsync || true)"
+if [ -n "${RESOLVED_XSYNC}" ] && [ "${RESOLVED_XSYNC}" != "${TARGET_PATH}" ]; then
+    warn "Another xsync is earlier on PATH: ${RESOLVED_XSYNC}. Use the PATH command below."
+fi
 echo ""
 echo -e "${C_CYAN}${MSG_USAGE_TITLE}${C_RESET}"
 echo "  ${MSG_USAGE_HINT}"
-echo "  export PATH=\"\$PATH:${INSTALL_DIR}\""
+echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+echo "  hash -r"
 echo "  xsync"
 echo "  xsync --help"
 echo ""

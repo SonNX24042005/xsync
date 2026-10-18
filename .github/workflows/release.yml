@@ -38,7 +38,15 @@ jobs:
           check-latest: true
 
       - name: Build binary
+        env:
+          CGO_ENABLED: '0'
         run: |
+          expected_version="${GITHUB_REF_NAME#v}"
+          actual_version="$(go run ./cmd/xsync --version)"
+          if [ "$actual_version" != "xsync $expected_version" ]; then
+            echo "Version mismatch: tag=$expected_version, executable=$actual_version"
+            exit 1
+          fi
           mkdir -p dist
           if [ "${{ matrix.goos }}" = "windows" ]; then
             BINARY_NAME="xsync.exe"

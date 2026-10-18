@@ -16,7 +16,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.ps1 | iex
 ```
 
-Hoặc build từ mã nguồn:
+Các lệnh cài đặt trên tải binary từ **GitHub Releases mới nhất**, không nhất thiết là commit mới nhất trên `main`. Installer hiển thị phiên bản đã cài. Bản có sẵn trong `bin/` của thư mục hiện tại không được ưu tiên.
+
+Hoặc build từ mã nguồn hiện tại:
 
 ```bash
 go build -o bin/xsync ./cmd/xsync

@@ -216,4 +216,5 @@ Write-Host "======================================================" -ForegroundC
 Write-Host "         $MsgInstalled                                " -ForegroundColor Green
 Write-Host "======================================================" -ForegroundColor Green
 Write-Host "  $MsgUsage" -ForegroundColor Cyan
+& $TargetPath --version
 Write-Host ""
