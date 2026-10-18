@@ -25,6 +25,8 @@ type Progress struct {
 }
 
 type progressKey struct{}
+type attemptKey struct{}
+type syncAttempt struct{ unchanged bool }
 type progressReporter func(Progress)
 
 func reportProgress(ctx context.Context, p Progress) {

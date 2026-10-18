@@ -26,12 +26,14 @@ type gitEntry struct {
 	Executable bool   `json:"executable,omitempty"`
 	Tree       string `json:"tree,omitempty"`
 	Stat       string `json:"stat,omitempty"`
+	Metadata   string `json:"metadata,omitempty"`
 }
 type gitSnapshot struct {
-	Identity   string              `json:"identity"`
-	Tree       string              `json:"tree"`
-	Entries    map[string]gitEntry `json:"entries"`
-	KnownPaths map[string]bool     `json:"known_paths"`
+	Identity     string              `json:"identity"`
+	Tree         string              `json:"tree"`
+	Entries      map[string]gitEntry `json:"entries"`
+	KnownPaths   map[string]bool     `json:"known_paths"`
+	RootMetadata string              `json:"root_metadata,omitempty"`
 }
 type gitMove struct{ From, To, Hash string }
 type gitPlan struct {
@@ -112,8 +114,8 @@ func scanGitEntries(ctx context.Context, c Config, all bool, previous map[string
 		if rel == "." {
 			return nil
 		}
-		// Git metadata and xsync's credentials/state are never indexed or auto-followed.
-		if d.Name() == ".git" || (c.storageRelative() != "" && (rel == c.storageRelative() || strings.HasPrefix(rel, c.storageRelative()+"/"))) {
+		// Keep xsync's credentials and private state outside the source snapshot.
+		if c.storageRelative() != "" && (rel == c.storageRelative() || strings.HasPrefix(rel, c.storageRelative()+"/")) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -129,7 +131,11 @@ func scanGitEntries(ctx context.Context, c Config, all bool, previous map[string
 			return nil
 		}
 		if d.IsDir() {
-			entries[rel] = gitEntry{Kind: "directory"}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			entries[rel] = gitEntry{Kind: "directory", Metadata: gitMetadata(info)}
 			return nil
 		}
 		// Ancestor paths may be relevant for traversal, but only selected files enter the snapshot.
@@ -140,10 +146,11 @@ func scanGitEntries(ctx context.Context, c Config, all bool, previous map[string
 		if err != nil {
 			return err
 		}
-		entry := gitEntry{Kind: "file", Executable: info.Mode()&0o111 != 0}
+		entry := gitEntry{Kind: "file", Executable: info.Mode()&0o111 != 0, Metadata: gitMetadata(info)}
 		// Include filesystem identity/change time where available, like Git's stat cache.
 		entry.Stat = fmt.Sprintf("%d:%d:%d:%v", info.Size(), info.ModTime().UnixNano(), info.Mode(), info.Sys())
 		if old, ok := previous[rel]; ok && old.Stat == entry.Stat && old.Kind == "file" && info.Mode().IsRegular() {
+			old.Metadata = entry.Metadata
 			entries[rel] = old
 			return nil
 		}
@@ -184,12 +191,35 @@ func scanGitEntries(ctx context.Context, c Config, all bool, previous map[string
 			}
 			entry.Hash = hex.EncodeToString(hash.Sum(nil))
 		} else {
-			return nil
+			// Fingerprint special entries without opening pipes or devices.
+			entry.Kind = "special"
+			sum := sha256.Sum256([]byte(entry.Metadata))
+			entry.Hash = hex.EncodeToString(sum[:])
 		}
 		entries[rel] = entry
 		return nil
 	})
 	return entries, err
+}
+
+// Permission and owner changes still need rsync even if Git's content tree is equal.
+// Timestamps are intentionally omitted: touching a file or adding an excluded
+// child must not start another transfer when the managed content is unchanged.
+func gitMetadata(info fs.FileInfo) string {
+	value := fmt.Sprintf("%d", info.Mode())
+	system := reflect.ValueOf(info.Sys())
+	if system.Kind() == reflect.Pointer && !system.IsNil() {
+		system = system.Elem()
+	}
+	if system.IsValid() && system.Kind() == reflect.Struct {
+		for _, name := range []string{"Uid", "Gid", "Rdev"} {
+			field := system.FieldByName(name)
+			if field.IsValid() && field.CanInterface() {
+				value += fmt.Sprintf(":%v", field.Interface())
+			}
+		}
+	}
+	return value
 }
 
 func selectedPath(c Config, rel string) bool {
@@ -204,10 +234,24 @@ func selectedPath(c Config, rel string) bool {
 	return false
 }
 
+func projectGitPath(rel string) bool {
+	for _, part := range strings.Split(rel, "/") {
+		if part == ".git" {
+			return true
+		}
+	}
+	return false
+}
+
 // Git tree objects include empty directories; blobs contain only fixed-size SHA-256 hashes.
 func writeGitTree(ctx context.Context, repo string, entries map[string]gitEntry) (string, error) {
 	children := make(map[string][]string)
 	for rel := range entries {
+		// Git trees reject .git entries. Their fingerprints remain in the private
+		// snapshot so a selected project's own Git data still triggers mirroring.
+		if projectGitPath(rel) {
+			continue
+		}
 		children[path.Dir(rel)] = append(children[path.Dir(rel)], rel)
 	}
 	var tree func(string) (string, error)
@@ -269,7 +313,7 @@ func prepareGitPlan(ctx context.Context, c Config, dry bool) (*gitPlan, error) {
 		return nil, nil
 	}
 	if _, err := exec.LookPath("git"); err != nil {
-		return &gitPlan{warning: "Git unavailable; using rsync without rename optimization.\n", release: func() {}}, nil
+		return &gitPlan{warning: "Git unavailable; using rsync for change checks and transfers without rename optimization.\n", release: func() {}}, nil
 	}
 	dir, _ := Dir(c.ID)
 	p := &gitPlan{repo: filepath.Join(dir, "changes.git"), stateFile: filepath.Join(dir, "changes.json"), original: c, effective: c, release: func() {}}
@@ -351,6 +395,9 @@ func prepareGitPlan(ctx context.Context, c Config, dry bool) (*gitPlan, error) {
 				}
 			}
 			for rel, entry := range entries {
+				if projectGitPath(rel) {
+					continue
+				}
 				if equivalentGitEntry(old, entry) && !p.before.KnownPaths[rel] {
 					candidates = append(candidates, rel)
 				}
@@ -382,7 +429,11 @@ func prepareGitPlan(ctx context.Context, c Config, dry bool) (*gitPlan, error) {
 	if err != nil {
 		return fail(err)
 	}
-	p.after = gitSnapshot{Identity: selectionIdentity(p.effective), Entries: entries, KnownPaths: known}
+	rootInfo, err := os.Lstat(c.LocalDir)
+	if err != nil {
+		return fail(err)
+	}
+	p.after = gitSnapshot{Identity: selectionIdentity(p.effective), Entries: entries, KnownPaths: known, RootMetadata: gitMetadata(rootInfo)}
 	p.after.Tree, err = writeGitTree(ctx, p.repo, entries)
 	if err != nil {
 		return fail(err)
@@ -418,6 +469,71 @@ func prepareGitPlan(ctx context.Context, c Config, dry bool) (*gitPlan, error) {
 		}
 	}
 	return p, nil
+}
+
+func (p *gitPlan) transferPendingPath() string {
+	return filepath.Join(filepath.Dir(p.stateFile), "sync-pending.json")
+}
+
+func (p *gitPlan) unchanged() (bool, error) {
+	if p == nil || p.repo == "" || p.before == nil || p.before.Identity != p.after.Identity ||
+		p.before.Tree != p.after.Tree || p.before.RootMetadata != p.after.RootMetadata || len(p.before.Entries) != len(p.after.Entries) {
+		return false, nil
+	}
+	for rel, next := range p.after.Entries {
+		if old, ok := p.before.Entries[rel]; !ok || old.Metadata != next.Metadata || old.Hash != next.Hash || old.Kind != next.Kind || old.Executable != next.Executable {
+			return false, nil
+		}
+	}
+	for _, name := range []string{p.pendingPath(), p.transferPendingPath()} {
+		if _, err := os.Lstat(name); err == nil {
+			return false, nil
+		} else if !os.IsNotExist(err) {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
+func (p *gitPlan) beginTransfer() error {
+	if p == nil || p.repo == "" {
+		return nil
+	}
+	// Keep a durable retry marker before any remote mutation. Local changes may
+	// revert to the previous baseline after a failed or interrupted transfer.
+	return writeJSON(p.transferPendingPath(), map[string]string{"identity": p.after.Identity})
+}
+
+func (p *gitPlan) completeTransfer() error {
+	if p == nil || p.repo == "" {
+		return nil
+	}
+	if err := os.Remove(p.transferPendingPath()); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+func (p *gitPlan) needsChecksum() bool {
+	if p == nil || p.repo == "" {
+		return false
+	}
+	if _, err := os.Lstat(p.transferPendingPath()); err == nil {
+		return true
+	}
+	if p.before == nil {
+		return false
+	}
+	for rel, next := range p.after.Entries {
+		old, ok := p.before.Entries[rel]
+		if ok && old.Kind == "file" && next.Kind == "file" && old.Hash != next.Hash {
+			previous, current := strings.SplitN(old.Stat, ":", 3), strings.SplitN(next.Stat, ":", 3)
+			if len(previous) < 3 || len(current) < 3 || (previous[0] == current[0] && previous[1] == current[1]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func equivalentGitEntry(a, b gitEntry) bool {
@@ -497,7 +613,7 @@ func knownGitPaths(ctx context.Context, c Config) (map[string]bool, error) {
 			}
 			return nil
 		}
-		if d.Name() == ".git" || (c.storageRelative() != "" && (rel == c.storageRelative() || strings.HasPrefix(rel, c.storageRelative()+"/"))) {
+		if c.storageRelative() != "" && (rel == c.storageRelative() || strings.HasPrefix(rel, c.storageRelative()+"/")) {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}

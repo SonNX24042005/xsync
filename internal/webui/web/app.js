@@ -53,7 +53,7 @@ const timeLabel = value => !value || value.startsWith('0001') ? 'Chưa đồng b
 function phaseLabel(session) {
   if (!session.running) return ['Đã dừng', ''];
   const phase = session.status.phase;
-  return ({ syncing: ['Đang đồng bộ', 'busy'], watching: ['Đang theo dõi', 'good'], retrying: ['Đang thử lại', 'error'], starting: ['Đang kết nối', 'busy'] })[phase] || ['Đang chạy', 'busy'];
+  return ({ checking: ['Đang kiểm tra thay đổi', 'busy'], syncing: ['Đang đồng bộ', 'busy'], watching: ['Chờ thay đổi', 'good'], retrying: ['Đang thử lại', 'error'], starting: ['Đang khởi động', 'busy'] })[phase] || ['Đang chạy', 'busy'];
 }
 function badge(session) { const [text, type] = phaseLabel(session); const node = el('span', 'badge ' + type); node.append(el('i'), document.createTextNode(text)); return node; }
 
@@ -506,7 +506,7 @@ function renderDetail() {
   const content = $('#detail-content'); content.replaceChildren();
   const progress = syncProgress(session, true); if (progress) content.append(progress);
   const grid = el('dl', 'detail-grid');
-  const pairs = [['Server', session.host], ['Trạng thái', phaseLabel(session)[0]], ['Thư mục local', session.local_dir], ['Thư mục remote', session.target], ['Lần đồng bộ thành công', timeLabel(session.status.last_success)], ['Cách xác thực', session.auth === 'key' ? 'SSH key / agent' : session.password_saved ? 'Mật khẩu đã lưu' : 'Mật khẩu không lưu'], ['Phạm vi', scopeDescription(session.selection_mode || 'include', (session.selections || []).map(s => s.path))], ['Mã phiên', session.id]];
+  const pairs = [['Server', session.host], ['Trạng thái', phaseLabel(session)[0]], ['Thư mục local', session.local_dir], ['Thư mục remote', session.target], ['Lần đồng bộ thành công', timeLabel(session.status.last_success)], ['Kiểm tra thay đổi gần nhất', timeLabel(session.status.last_checked)], ['Cách xác thực', session.auth === 'key' ? 'SSH key / agent' : session.password_saved ? 'Mật khẩu đã lưu' : 'Mật khẩu không lưu'], ['Phạm vi', scopeDescription(session.selection_mode || 'include', (session.selections || []).map(s => s.path))], ['Mã phiên', session.id]];
   for (const [key, value] of pairs) { const group = el('div'); group.append(el('dt', '', key), el('dd', '', value)); grid.append(group); } content.append(grid);
   if (session.status.last_error) content.append(el('div', 'detail-error', session.status.last_error));
   if (!session.running && (session.auth === 'key' || session.password_saved)) { const actions = el('div', 'log-heading'), start = button('Chạy nền và bật tự khởi động', 'play'); start.onclick = () => controlSession(session, start, true); actions.append(start); content.append(actions); }

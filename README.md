@@ -45,7 +45,7 @@ Host my-server
 Chỉ cần chạy `xsync`, sau đó chọn **Phiên đồng bộ**, **Tạo phiên mới**, **Máy chủ**, **Mở giao diện web** hoặc **Cài đặt**. Menu dùng `↑`/`↓`, `Enter`, `/` để tìm, `PgUp`/`PgDn`, `Home`/`End` và `Esc` để quay lại. Danh sách phiên/máy chủ tự làm mới mỗi 2 giây; nhấn `r` để làm mới ngay.
 
 - Phiên đồng bộ: xem chi tiết/trạng thái, bắt đầu/dừng, xem log, xem trước thay đổi, chọn lại dữ liệu khi phiên đã dừng.
-- Tiến độ: web hiển thị thanh tiến độ trong danh sách và trang chi tiết. Terminal hiển thị tiến độ trong danh sách, màn hình chi tiết tự cập nhật mỗi giây và khi chạy trực tiếp. Có trạng thái kết nối, quét, xử lý đổi tên, truyền dữ liệu và hoàn tất. Phần trăm, tốc độ và thời gian còn lại do rsync ước tính; dung lượng là dữ liệu đã xử lý, bao gồm các block tái sử dụng, không phải số byte đi qua mạng. Chỉ báo 100% sau khi toàn bộ lượt đồng bộ và mốc Git đã lưu thành công. Lỗi giữ tiến độ dở dang; lượt thử lại bắt đầu lại phép đo. Worker cũ cần dừng và bắt đầu lại để nhận tính năng này.
+- Tiến độ: web hiển thị thanh tiến độ trong danh sách và trang chi tiết. Terminal hiển thị tiến độ trong danh sách, màn hình chi tiết tự cập nhật mỗi giây và khi chạy trực tiếp. Quét Git hiển thị “Đang kiểm tra thay đổi”; khi dữ liệu không đổi, giữ nguyên tiến độ lượt thành công trước và trở về “Chờ thay đổi”. Chỉ đặt lại tiến độ khi bắt đầu kết nối để truyền thay đổi. Phần trăm, tốc độ và thời gian còn lại do rsync ước tính; dung lượng là dữ liệu đã xử lý, bao gồm các block tái sử dụng, không phải số byte đi qua mạng. Chỉ báo 100% sau khi toàn bộ lượt đồng bộ và mốc Git đã lưu thành công. Lỗi giữ tiến độ dở dang. Worker cũ cần dừng và bắt đầu lại để nhận tính năng này.
 - Máy chủ: hiển thị **Đã dùng key** và **Đã lưu mật khẩu**, kiểm tra SSH key, kiểm tra kết nối SSH/rsync, lưu/thay hoặc ngừng dùng mật khẩu.
 - Tạo phiên: chọn server và xác thực → thư mục A/B → dữ liệu → xem trước/xác nhận. Có thể dùng mật khẩu đã lưu mà không nhập lại.
 - Duyệt thư mục: `Enter` mở, `Backspace` lên thư mục cha, `/` tìm, `g` nhập đường dẫn, `r` tải lại, `Space` chọn, `Tab` hoàn tất chọn dữ liệu. Remote hỗ trợ `n` tạo thư mục.
@@ -73,6 +73,8 @@ Các phiên tạm do UI khởi chạy tiếp tục đồng bộ khi đóng tab, 
 
 Sau lần đồng bộ thành công đầu tiên, mỗi phiên có kho Git riêng tại `~/.config/xsync/sessions/<id>/changes.git`. Kho này chỉ lưu cấu trúc đường dẫn và SHA-256 của nội dung, không sao chép nội dung file, không tạo commit trong dự án và không sửa index/branch của kho Git sẵn có. Không có thao tác push lên GitHub.
 
+Mỗi lượt kiểm tra tạo ảnh chụp phạm vi nguồn và so sánh với mốc thành công. Nếu nội dung, đường dẫn, quyền và chủ sở hữu không đổi, không gọi SSH/rsync. Chỉ thay đổi timestamp không kích hoạt truyền; bộ nhớ đệm stat được cập nhật sau quét. Metadata `.git` của dự án vẫn được theo dõi nếu nằm trong phạm vi chọn, nhưng không đưa vào cây Git dùng nhận diện đổi tên. Không có Git ở local thì quay về đối soát bằng rsync và ghi cảnh báo.
+
 - Git so sánh mốc đã đồng bộ với cấu trúc hiện tại và nhận diện file đổi đường dẫn có nội dung trùng hoàn toàn. xsync kiểm tra SHA-256 của bản remote, rồi chuyển file ngay trên remote nếu đích chưa tồn tại và các thư mục cha không phải symlink. Rsync tiếp tục xử lý phần dữ liệu mới/sửa/xóa.
 - Đổi tên hoặc di chuyển thư mục con bên trong phạm vi đã chọn tận dụng lại các file không đổi. File vừa di chuyển vừa sửa vẫn được rsync cập nhật theo cách thông thường.
 - Nếu đổi tên/di chuyển chính thư mục hoặc file đã chọn riêng bên trong nguồn A, xsync tìm đường dẫn mới khi có đúng một kết quả khớp toàn bộ nội dung và đường dẫn đó chưa tồn tại ở mốc trước. Sau khi đồng bộ thành công, lựa chọn trong phiên được cập nhật; tên cũ được dọn trong phạm vi cũ. Không tự chiếm một đích remote đã tồn tại ngoài phạm vi đang quản lý.
@@ -88,6 +90,7 @@ Cơ chế này không tự tìm lại chính thư mục nguồn A nếu A bị �
 | Cấu hình và phần dữ liệu được chọn | `~/.config/xsync/sessions/<id>/session.json` |
 | Trạng thái, log và điều khiển worker | Cùng thư mục của phiên |
 | Mốc đổi tên/di chuyển | `changes.git`, `changes.json`, `changes-pending.json` trong thư mục phiên |
+| Lượt truyền chưa hoàn tất | `sync-pending.json` trong thư mục phiên; chỉ bỏ dấu này sau khi truyền và lưu mốc thành công |
 | Mật khẩu chung và lịch sử key | `~/.config/xsync/servers.json` |
 | Ngôn ngữ | `~/.config/xsync/config.json` |
 | Bản sao cấu hình cũ | `~/.config/xsync/migrations/<thời điểm>-<mã>/` |
@@ -107,6 +110,8 @@ Phản chiếu thao tác xóa chỉ tác động đến phần đang được đ
 
 Web cho chọn chế độ tại bước **Dữ liệu** khi tạo phiên và hiển thị phạm vi ở bước xác nhận/trang chi tiết. Trong TUI, chọn chế độ khi tạo phiên, hoặc dừng phiên → **Chọn lại dữ liệu** để đổi chế độ và danh sách của phiên hiện có. Khi đổi chế độ, giao diện xóa lựa chọn đang nhập để chọn lại theo ý nghĩa mới; cấu hình đã lưu chỉ thay đổi sau khi hoàn tất. Chế độ và danh sách lưu trong `session.json`; mốc Git tách biệt theo phạm vi, không nhận diện đổi tên xuyên qua mục loại trừ.
 
-Đích luôn là `B/A`. Lần đầu chạy ngay; thay đổi được gom khoảng 750 ms, đối soát mỗi 30 giây. Mỗi phiên chỉ chạy một lượt rsync tại một thời điểm.
+Đích luôn là `B/A`. Khi chưa có mốc, lần đầu truyền để tạo mốc. Thay đổi filesystem được gom khoảng 750 ms; mỗi 30 giây có lượt quét Git dự phòng cho sự kiện bị bỏ lỡ. Cả hai đều so sánh local với mốc trước rồi mới quyết định chạy rsync. Mỗi phiên chỉ chạy một lượt tại một thời điểm. “Kiểm tra thay đổi gần nhất” cập nhật sau quét; “Lần đồng bộ thành công” chỉ cập nhật sau truyền thành công.
+
+Lượt quét không liên hệ remote khi local không đổi, nên không tự phát hiện dữ liệu bị sửa/xóa trực tiếp trên remote hoặc mất kết nối trong thời gian chờ. Xem trước vẫn gọi rsync để kiểm tra đích. Lượt truyền lỗi được giữ dấu để lần sau đối soát lại, kể cả local đã quay về nội dung cũ. Khi Git phát hiện nội dung đổi nhưng kích thước/timestamp giữ nguyên, hoặc đang thử lại lượt truyền lỗi, rsync dùng checksum để tránh bỏ qua nội dung cần sửa.
 
 Tự khởi động dùng systemd user + linger trên Linux, LaunchAgent trên macOS và Scheduled Task trên Windows. Key có passphrase cần SSH agent dùng được trong môi trường dịch vụ. Chạy trước đăng nhập trên Linux cần quyền bật linger.

@@ -19,6 +19,7 @@ type Status struct {
 	Phase       string    `json:"phase"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	LastSuccess time.Time `json:"last_success,omitempty"`
+	LastChecked time.Time `json:"last_checked,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
 	Progress    *Progress `json:"progress,omitempty"`
 }
@@ -144,7 +145,11 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	dir, _ := Dir(c.ID)
-	state := Status{PID: os.Getpid(), Phase: "starting"}
+	previous := ReadStatus(c.ID)
+	state := Status{PID: os.Getpid(), Phase: "starting", LastSuccess: previous.LastSuccess, LastChecked: previous.LastChecked}
+	if previous.Progress != nil && previous.Progress.Stage == "completed" {
+		state.Progress = previous.Progress
+	}
 	publish := func(phase string) {
 		state.Phase, state.UpdatedAt = phase, time.Now()
 		if err := writeJSON(filepath.Join(dir, "status.json"), state); err != nil {
@@ -161,8 +166,9 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 	timer := time.NewTimer(0)
 	defer timer.Stop()
 	type result struct {
-		output string
-		err    error
+		output    string
+		err       error
+		unchanged bool
 	}
 	finished := make(chan result, 1)
 	updates := make(chan Progress, 1)
@@ -177,7 +183,12 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 	defer progressTick.Stop()
 	progressDirty := false
 	consumeProgress := func(p Progress) {
-		state.Progress = &p
+		if p.Stage == "scanning" {
+			state.Phase = "checking"
+		} else {
+			state.Phase = "syncing"
+			state.Progress = &p
+		}
 		progressDirty = true
 	}
 	running, dirty := false, true
@@ -211,7 +222,7 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 			}
 		case <-progressTick.C:
 			if running && progressDirty {
-				publish("syncing")
+				publish(state.Phase)
 				progressDirty = false
 			}
 		case event, ok := <-w.Events:
@@ -257,10 +268,14 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 			}
 			running, dirty = true, false
 			firstChange = time.Time{}
-			state.Progress = &Progress{Stage: "connecting", UpdatedAt: time.Now()}
 			progressDirty = false
-			publish("syncing")
-			go func() { out, err := syncNow(syncCtx); finished <- result{out, err} }()
+			publish("checking")
+			go func() {
+				attempt := &syncAttempt{}
+				attemptCtx := context.WithValue(syncCtx, attemptKey{}, attempt)
+				out, err := syncNow(attemptCtx)
+				finished <- result{out, err, attempt.unchanged}
+			}()
 		case result := <-finished:
 			select {
 			case p := <-updates:
@@ -286,14 +301,17 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 				arm(retry)
 				retry = min(60*time.Second, retry*2)
 			} else {
-				complete := 100
-				if state.Progress == nil {
-					state.Progress = &Progress{}
+				state.LastChecked, state.LastError = time.Now(), ""
+				if !result.unchanged {
+					complete := 100
+					if state.Progress == nil {
+						state.Progress = &Progress{}
+					}
+					state.Progress.Stage, state.Progress.Percent = "completed", &complete
+					state.Progress.Estimated, state.Progress.Rate, state.Progress.ETA = false, "", ""
+					state.Progress.UpdatedAt = time.Now()
+					state.LastSuccess = time.Now()
 				}
-				state.Progress.Stage, state.Progress.Percent = "completed", &complete
-				state.Progress.Estimated, state.Progress.Rate, state.Progress.ETA = false, "", ""
-				state.Progress.UpdatedAt = time.Now()
-				state.LastSuccess, state.LastError = time.Now(), ""
 				retry = o.Retry
 				if strings.TrimSpace(result.output) != "" {
 					logger.Print(strings.TrimSpace(result.output))

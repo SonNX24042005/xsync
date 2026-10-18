@@ -223,33 +223,57 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 	if dry {
 		ctx = context.WithValue(ctx, progressKey{}, nil)
 	}
-	reportProgress(ctx, Progress{Stage: "connecting"})
 	if err := c.Validate(); err != nil {
 		return "", err
-	}
-	if !t.checked {
-		if err := t.Check(ctx); err != nil {
-			return "", err
-		}
 	}
 	info, err := os.Lstat(c.LocalDir)
 	if err != nil || !info.IsDir() {
 		return "", fmt.Errorf("source folder is unavailable; remote deletion is suspended: %s", c.LocalDir)
-	}
-	// Refuse remote symlinks or a conflicting file instead of deleting them.
-	target := ShellQuote(c.Target())
-	if _, err := t.Run(ctx, "test -d "+ShellQuote(c.RemoteParent)+" && test ! -L "+target+" && { test ! -e "+target+" || test -d "+target+"; }"); err != nil {
-		return "", fmt.Errorf("remote parent is unavailable or target is a file/symlink: %w", err)
 	}
 	reportProgress(ctx, Progress{Stage: "scanning"})
 	plan, err := prepareGitPlan(ctx, c, dry)
 	if err != nil {
 		return "", err
 	}
+	if plan != nil {
+		defer plan.release()
+	}
+	if !dry {
+		unchanged, err := plan.unchanged()
+		if err != nil {
+			return "", err
+		}
+		if unchanged {
+			// Refresh the local stat cache without touching SSH, rsync or the sync timestamp.
+			if err := writeJSON(plan.stateFile, plan.after); err != nil {
+				return "", err
+			}
+			if attempt, ok := ctx.Value(attemptKey{}).(*syncAttempt); ok {
+				attempt.unchanged = true
+			}
+			return "", nil
+		}
+	}
+	checksum := plan.needsChecksum()
+	if !dry {
+		if err := plan.beginTransfer(); err != nil {
+			return "", err
+		}
+	}
+	reportProgress(ctx, Progress{Stage: "connecting"})
+	if !t.checked {
+		if err := t.Check(ctx); err != nil {
+			return "", err
+		}
+	}
+	// Refuse remote symlinks or a conflicting file instead of deleting them.
+	target := ShellQuote(c.Target())
+	if _, err := t.Run(ctx, "test -d "+ShellQuote(c.RemoteParent)+" && test ! -L "+target+" && { test ! -e "+target+" || test -d "+target+"; }"); err != nil {
+		return "", fmt.Errorf("remote parent is unavailable or target is a file/symlink: %w", err)
+	}
 	effective := c
 	var prefix string
 	if plan != nil {
-		defer plan.release()
 		if plan.repo != "" {
 			effective = plan.effective
 			// The previous selected root remains managed until a successful relocation finishes.
@@ -262,6 +286,9 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 	}
 	args := []string{"-az", "--modify-window=-1", "--protect-args", "--delete-delay", "--partial", "--timeout=60",
 		"--itemize-changes", "--out-format=%i %n%L", "-e", t.RsyncShell()}
+	if checksum {
+		args = append(args, "--checksum")
+	}
 	if dry {
 		args = append(args, "--dry-run")
 	} else {
@@ -311,6 +338,9 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 		finalizing.Stage, finalizing.Rate, finalizing.ETA = "finishing", "", ""
 		reportProgress(ctx, finalizing)
 		if err := plan.finish(ctx); err != nil {
+			return prefix + text, err
+		}
+		if err := plan.completeTransfer(); err != nil {
 			return prefix + text, err
 		}
 	}

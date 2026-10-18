@@ -465,6 +465,9 @@ func statusText(c session.Config) string {
 	if !s.LastSuccess.IsZero() {
 		fmt.Fprintf(&out, "%s: %s\n", tr("Đồng bộ thành công gần nhất", "Last successful sync"), s.LastSuccess.Local().Format(time.RFC3339))
 	}
+	if !s.LastChecked.IsZero() {
+		fmt.Fprintf(&out, "%s: %s\n", tr("Kiểm tra thay đổi gần nhất", "Last change check"), s.LastChecked.Local().Format(time.RFC3339))
+	}
 	if s.LastError != "" {
 		fmt.Fprintf(&out, "%s: %s\n", tr("Lỗi gần nhất", "Latest error"), safeOutput(s.LastError))
 	}
@@ -545,7 +548,9 @@ func phaseLabel(running bool, phase string) string {
 	}
 	switch phase {
 	case "watching":
-		return tr("Đang theo dõi", "Watching")
+		return tr("Chờ thay đổi", "Waiting for changes")
+	case "checking":
+		return tr("Đang kiểm tra thay đổi", "Checking for changes")
 	case "syncing":
 		return tr("Đang đồng bộ", "Syncing")
 	case "starting":
