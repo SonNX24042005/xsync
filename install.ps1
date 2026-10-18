@@ -63,7 +63,7 @@ if ($ChosenLang -eq "en") {
     $MsgReleaseCheck = "Checking pre-built releases on GitHub Releases..."
     $MsgReleaseInstalled = "Downloaded and installed xsync from GitHub Releases successfully!"
     $MsgInstalled = "INSTALLATION COMPLETED!"
-    $MsgUsage = "Open a new PowerShell window and run: xsync --help"
+    $MsgUsage = "Open a new PowerShell window and run: xsync"
 } else {
     $MsgHeader = "CAI DAT XSYNC (PARALLEL RSYNC CLI)"
     $MsgLangSaved = "Da luu ngon ngu mac dinh: Tieng Viet (vi) tai ~/.config/xsync/config.json"
@@ -73,7 +73,7 @@ if ($ChosenLang -eq "en") {
     $MsgReleaseCheck = "Dang kiem tra ban phat hanh pre-built tren GitHub Releases..."
     $MsgReleaseInstalled = "Da tai va cai dat xsync tu GitHub Releases thanh cong!"
     $MsgInstalled = "CAI DAT XSYNC HOAN TAT!"
-    $MsgUsage = "Mo mot cua so PowerShell moi va chay: xsync --help"
+    $MsgUsage = "Mo mot cua so PowerShell moi va chay: xsync"
 }
 
 Write-Host ""

@@ -352,7 +352,7 @@ function updateStartupHint() {
   const allowed = auth === 'key' || $('#save-password').checked;
   $('#autostart').disabled = !allowed || !$('#start-now').checked;
   if (!allowed || !$('#start-now').checked) $('#autostart').checked = false;
-  $('#startup-hint').textContent = !allowed ? 'Không lưu mật khẩu: phiên chạy khi tiến trình xsync ui còn hoạt động, kể cả khi đóng tab.' : state.info.platform === 'linux' ? 'Tự khởi động dùng systemd của tài khoản và bật linger. Nếu bỏ chọn, phiên chạy khi xsync ui còn hoạt động.' : 'Tự chạy khi đăng nhập tài khoản. Nếu bỏ chọn, phiên chạy khi xsync ui còn hoạt động.';
+  $('#startup-hint').textContent = !allowed ? 'Không lưu mật khẩu: phiên chạy khi tiến trình giao diện web còn hoạt động, kể cả khi đóng tab.' : state.info.platform === 'linux' ? 'Tự khởi động dùng systemd của tài khoản và bật linger. Nếu bỏ chọn, phiên chạy khi giao diện web còn hoạt động.' : 'Tự chạy khi đăng nhập tài khoản. Nếu bỏ chọn, phiên chạy khi giao diện web còn hoạt động.';
 }
 function isCovered(relative) { for (const [selected, dir] of state.selected) if (selected === '.' || selected === relative || (dir && relative.startsWith(selected + '/'))) return true; return false; }
 function toggleSelection(relative, dir) {

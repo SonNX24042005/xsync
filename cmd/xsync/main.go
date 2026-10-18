@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"golang.org/x/term"
 	"xsync/internal/i18n"
@@ -13,7 +12,6 @@ import (
 	"xsync/internal/session"
 	"xsync/internal/sessioncli"
 	"xsync/internal/tui"
-	"xsync/internal/webui"
 )
 
 const Version = "1.0.1"
@@ -21,165 +19,89 @@ const Version = "1.0.1"
 func main() { os.Exit(run(os.Args[1:])) }
 
 func help() string {
-	return tui.Text(`xsync · Đồng bộ theo phiên
+	return tui.Text(`xsync · Đồng bộ thư mục
 
-  xsync                       Mở menu tương tác
-  xsync ui                    Mở giao diện web
-  xsync session               Quản lý phiên trong terminal
-  xsync session new           Tạo phiên
-  xsync session --help         Các lệnh quản lý phiên
-  xsync server                Quản lý máy chủ, mật khẩu và SSH key
-  xsync server --help          Các lệnh quản lý máy chủ
-  xsync config-path           Xem nơi lưu dữ liệu
-  xsync --lang vi|en           Chọn ngôn ngữ cho lần chạy này
-  xsync --set-lang vi|en       Lưu ngôn ngữ mặc định
-  xsync --version             Xem phiên bản
+  xsync             Mở giao diện terminal tương tác
+  xsync --help      Xem hướng dẫn
+  xsync --version   Xem phiên bản
 
-Cấu hình, dữ liệu được chọn và xác thực được lưu tập trung theo phiên.
-Không cần xsync.ini, xsync.push.ini hoặc xsync.pull.ini.`, `xsync · Session-based synchronization
+Trong giao diện, dùng ↑/↓ và Enter để quản lý phiên, máy chủ,
+mật khẩu, SSH key, giao diện web và cài đặt. Esc để quay lại.
+Chọn Cài đặt để đổi ngôn ngữ và xem nơi lưu dữ liệu.`, `xsync · Folder synchronization
 
-  xsync                       Open the interactive menu
-  xsync ui                    Open the web interface
-  xsync session               Manage sessions in the terminal
-  xsync session new           Create a session
-  xsync session --help         Session commands
-  xsync server                Manage hosts, passwords and SSH keys
-  xsync server --help          Server commands
-  xsync config-path           Show storage locations
-  xsync --lang vi|en           Set language for this invocation
-  xsync --set-lang vi|en       Save the default language
-  xsync --version             Show version
+  xsync             Open the interactive terminal interface
+  xsync --help      Show help
+  xsync --version   Show version
 
-Configuration, selections and authentication are stored centrally per session.
-No xsync.ini, xsync.push.ini or xsync.pull.ini is needed.`)
+Use ↑/↓ and Enter to manage sessions, servers, passwords, SSH keys,
+the web interface and settings. Press Esc to go back.
+Open Settings to change the language and view storage locations.`)
+}
+
+func workerInvocation(args []string) (string, bool) {
+	if len(args) == 2 && args[0] == session.WorkerCommand {
+		return args[1], true
+	}
+	// Keep service definitions created by previous versions working.
+	if len(args) == 3 && args[0] == "session" && args[1] == "run" {
+		return args[2], true
+	}
+	return "", false
+}
+
+func migrateProject() error {
+	dir, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	i18n.LoadSavedLanguage(filepath.Join(dir, "xsync.ini"))
+	backup, err := migration.Legacy(dir)
+	if err != nil {
+		return err
+	}
+	if backup != "" {
+		fmt.Fprintln(os.Stderr, tui.Text("Đã chuyển cấu hình cũ; bản sao lưu: ", "Legacy configuration migrated; backup: ")+backup)
+	}
+	return nil
 }
 
 func run(args []string) int {
-	legacyPreferences := ""
-	if dir, err := os.Getwd(); err == nil {
-		legacyPreferences = filepath.Join(dir, "xsync.ini")
-	}
-	i18n.LoadSavedLanguage(legacyPreferences)
-	var rest []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--lang" || arg == "--set-lang":
-			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "Missing language: vi|en")
-				return 1
-			}
-			i++
-			if arg == "--set-lang" {
-				if err := i18n.SaveGlobalLanguage(args[i]); err != nil {
-					fmt.Fprintln(os.Stderr, err)
-					return 1
-				}
-				return 0
-			}
-			i18n.SetLanguage(args[i])
-		case strings.HasPrefix(arg, "--lang="):
-			i18n.SetLanguage(strings.TrimPrefix(arg, "--lang="))
-		case strings.HasPrefix(arg, "--set-lang="):
-			if err := i18n.SaveGlobalLanguage(strings.TrimPrefix(arg, "--set-lang=")); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return 1
-			}
-			return 0
-		default:
-			rest = append(rest, arg)
+	// Workers never enter the TUI or inspect a project's legacy configuration.
+	if id, ok := workerInvocation(args); ok {
+		if err := sessioncli.RunWorker(id); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
 		}
+		return 0
 	}
-	if len(rest) == 1 {
-		switch rest[0] {
-		case "help", "--help", "-h":
+	i18n.LoadSavedLanguage("")
+	if len(args) == 1 {
+		switch args[0] {
+		case "--help", "-h":
 			fmt.Println(help())
 			return 0
-		case "version", "--version", "-v":
+		case "--version", "-v":
 			fmt.Printf("xsync %s\n", Version)
 			return 0
-		case "config-path":
-			root, err := session.Root()
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				return 1
-			}
-			fmt.Println(root)
-			fmt.Println(strings.TrimSuffix(root, "sessions") + "servers.json")
-			fmt.Println(i18n.GetGlobalConfigPath())
-			return 0
 		}
 	}
-	if len(rest) > 0 && rest[0] != "session" && rest[0] != "server" && rest[0] != "ui" {
+	if len(args) > 0 {
+		fmt.Fprintln(os.Stderr, tui.Text("Hãy chạy xsync và chọn thao tác trong giao diện terminal.", "Run xsync and choose an action in the terminal interface."))
 		fmt.Fprintln(os.Stderr, help())
 		return 1
 	}
-	// Background workers never inspect a project's configuration files.
-	if !(len(rest) >= 2 && rest[0] == "session" && rest[1] == "run") {
-		dir, err := os.Getwd()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		backup, err := migration.Legacy(dir)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 1
-		}
-		if backup != "" {
-			fmt.Fprintln(os.Stderr, tui.Text("Đã chuyển cấu hình cũ; bản sao lưu: ", "Legacy configuration migrated; backup: ")+backup)
-		}
-	}
-	if handled, code := webui.Dispatch(rest); handled {
-		return code
-	}
-	if handled, code := sessioncli.Dispatch(rest); handled {
-		return code
-	}
-	if len(rest) > 0 {
+	if !term.IsTerminal(int(os.Stdin.Fd())) || !term.IsTerminal(int(os.Stdout.Fd())) {
+		fmt.Fprintln(os.Stderr, tui.Text("Cần terminal tương tác để mở xsync.", "An interactive terminal is required to open xsync."))
 		fmt.Fprintln(os.Stderr, help())
 		return 1
 	}
-	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		fmt.Println(help())
-		return 0
+	if err := migrateProject(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
 	}
 	if err := workspace(); err != nil && !errors.Is(err, tui.ErrCancelled) {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	return 0
-}
-
-func workspace() error {
-	for {
-		chosen, err := tui.ChooseItems("xsync", []tui.MenuItem{
-			{ID: "sessions", Label: tui.Text("Phiên đồng bộ", "Sync sessions")},
-			{ID: "new", Label: tui.Text("Tạo phiên mới", "Create session")},
-			{ID: "servers", Label: tui.Text("Máy chủ", "Servers")},
-			{ID: "web", Label: tui.Text("Mở giao diện web", "Open web interface")},
-			{ID: "exit", Label: tui.Text("Thoát", "Exit")},
-		}, nil)
-		if err != nil {
-			return err
-		}
-		switch chosen.ID {
-		case "sessions":
-			err = sessioncli.Menu()
-		case "new":
-			err = sessioncli.New()
-		case "servers":
-			err = sessioncli.Servers()
-		case "web":
-			_, code := webui.Dispatch([]string{"ui"})
-			if code != 0 {
-				err = fmt.Errorf("web interface exited with code %d", code)
-			}
-		case "exit":
-			return nil
-		}
-		if err != nil && !errors.Is(err, tui.ErrCancelled) {
-			tui.PrintErr(err.Error())
-		}
-	}
 }

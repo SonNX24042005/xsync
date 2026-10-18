@@ -166,7 +166,7 @@ func (a *App) Handler(host string) http.Handler {
 				}
 			}
 			if subtle.ConstantTimeCompare([]byte(provided), []byte(a.token)) != 1 {
-				jsonError(w, 401, fmt.Errorf("Mở giao diện bằng đường dẫn được in bởi lệnh xsync ui."))
+				jsonError(w, 401, fmt.Errorf("Chạy xsync, chọn Mở giao diện web và dùng đường dẫn đầy đủ được hiển thị."))
 				return
 			}
 			if r.URL.Path == "/api/info" && strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") && strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") != "" {

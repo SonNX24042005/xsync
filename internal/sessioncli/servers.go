@@ -9,22 +9,6 @@ import (
 	"xsync/internal/tui"
 )
 
-func serverHelp() string {
-	return tr(`Máy chủ SSH
-  xsync server                    Mở menu máy chủ
-  xsync server list               Liệt kê máy chủ và xác thực đã lưu
-  xsync server check <host>       Kiểm tra kết nối SSH và rsync
-  xsync server check-key <host>   Kiểm tra và ghi nhớ SSH key
-  xsync server password <host>    Nhập mật khẩu ẩn và lưu
-  xsync server disable-password <host>  Ngừng dùng mật khẩu cho kết nối mới`, `SSH servers
-  xsync server                    Open the server menu
-  xsync server list               List hosts and saved authentication
-  xsync server check <host>       Check SSH connectivity and rsync
-  xsync server check-key <host>   Verify and remember the SSH key
-  xsync server password <host>    Read a hidden password and save it
-  xsync server disable-password <host>  Disable saved passwords for new connections`)
-}
-
 func serverItems() ([]tui.MenuItem, error) {
 	settings, err := serverstore.Read()
 	if err != nil {
@@ -88,34 +72,7 @@ func serverAction(host, action string) (string, error) {
 		}
 		return text, nil
 	}
-	return "", fmt.Errorf("%s", serverHelp())
-}
-
-func serverCommand(args []string) error {
-	if len(args) == 0 {
-		return Servers()
-	}
-	if len(args) == 1 {
-		switch args[0] {
-		case "help", "--help", "-h":
-			fmt.Println(serverHelp())
-			return nil
-		case "list":
-			items, err := serverItems()
-			for _, item := range items {
-				fmt.Println(safeOutput(item.Label))
-			}
-			return err
-		}
-	}
-	if len(args) != 2 {
-		return fmt.Errorf("%s", serverHelp())
-	}
-	out, err := serverAction(args[1], args[0])
-	if err == nil {
-		fmt.Println(safeOutput(out))
-	}
-	return err
+	return "", fmt.Errorf("unknown server action: %s", action)
 }
 
 func Servers() error {

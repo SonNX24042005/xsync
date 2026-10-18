@@ -16,7 +16,6 @@ import (
 	"golang.org/x/term"
 	"xsync/internal/config"
 	"xsync/internal/fsbrowse"
-	"xsync/internal/i18n"
 	"xsync/internal/serverstore"
 	"xsync/internal/session"
 	"xsync/internal/tui"
@@ -24,171 +23,40 @@ import (
 
 var tr = tui.Text
 
-// Dispatch handles session and server commands without project configuration files.
-func Dispatch(args []string) (bool, int) {
-	var remaining []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--lang" && i+1 < len(args) {
-			i++
-			i18n.SetLanguage(args[i])
-			continue
-		}
-		if strings.HasPrefix(args[i], "--lang=") {
-			i18n.SetLanguage(strings.TrimPrefix(args[i], "--lang="))
-			continue
-		}
-		remaining = append(remaining, args[i])
-	}
-	if len(remaining) > 0 && remaining[0] == "server" {
-		err := serverCommand(remaining[1:])
-		if err == nil || errors.Is(err, tui.ErrCancelled) {
-			return true, 0
-		}
-		fmt.Fprintln(os.Stderr, err)
-		return true, 1
-	}
-	if len(remaining) == 0 || remaining[0] != "session" {
-		return false, 0
-	}
-	if err := command(remaining[1:]); err != nil {
-		if errors.Is(err, tui.ErrCancelled) {
-			return true, 0
-		}
-		fmt.Fprintln(os.Stderr, err)
-		return true, 1
-	}
-	return true, 0
-}
-
-func Help() string {
-	return tr(`Phiên đồng bộ thư mục (local A → remote B/A)
-
-  xsync session new           Chọn server, xác thực, thư mục và dữ liệu
-  xsync session list          Xem các phiên đã lưu
-  xsync session status <id>   Xem trạng thái và lỗi gần nhất
-  xsync session start <id>    Chạy nền và bật tự khởi động
-  xsync session background <id> Chạy nền, không tự khởi động
-  xsync session stop <id>     Dừng dịch vụ và tắt tự khởi động
-  xsync session run <id>      Chạy trong terminal, Ctrl+C để dừng
-  xsync session preview <id>  Xem trước thay đổi, không truyền/xóa
-  xsync session select <id>   Chọn lại dữ liệu khi phiên đã dừng
-  xsync session logs <id>     Xem log gần nhất
-
-Phiên phản chiếu cả thao tác xóa trong phần dữ liệu đã chọn.
-Linux: tự chạy khi boot qua systemd user + linger.
-macOS/Windows: tự chạy khi đăng nhập tài khoản.`, `Folder mirror sessions (local A → remote B/A)
-
-  xsync session new           Choose server, authentication, folders and data
-  xsync session list          List saved sessions
-  xsync session status <id>   Show status and the latest error
-  xsync session start <id>    Run in background and enable startup
-  xsync session background <id> Run in background without startup
-  xsync session stop <id>     Stop the service and disable startup
-  xsync session run <id>      Run in this terminal, Ctrl+C to stop
-  xsync session preview <id>  Preview changes without transferring/deleting
-  xsync session select <id>   Change selection while the session is stopped
-  xsync session logs <id>     Show recent logs
-
-Sessions also mirror deletions within the selected scope.
-Linux: boot startup via systemd user + linger.
-macOS/Windows: startup when the user logs in.`)
-}
-
-func command(args []string) error {
-	if len(args) == 0 {
-		return Menu()
-	}
-	if args[0] == "help" || args[0] == "-h" || args[0] == "--help" {
-		fmt.Println(Help())
-		return nil
-	}
-	if args[0] == "new" && len(args) == 1 {
-		return wizard()
-	}
-	if args[0] == "list" && len(args) == 1 {
-		return list()
-	}
-	if len(args) != 2 {
-		return fmt.Errorf("%s", Help())
-	}
-	c, err := session.Load(args[1])
+// RunWorker is the noninteractive entry point used by background processes and services.
+func RunWorker(id string) error {
+	temporary := os.Getenv("XSYNC_SESSION_PASSWORD")
+	os.Unsetenv("XSYNC_SESSION_PASSWORD")
+	c, err := session.Load(id)
 	if err != nil {
 		return err
 	}
-	switch args[0] {
-	case "status":
-		return status(c)
-	case "background":
-		if c.Auth == "password" && c.Password == "" {
-			c.Password, err = readPassword()
-			if err != nil {
-				return err
-			}
-		}
-		return session.StartDetached(c)
-	case "start":
-		if err = session.Start(c.ID); err != nil {
-			return err
-		}
-		fmt.Println(tr("Đã bật phiên nền và tự khởi động.", "Background session and startup enabled."))
-		return nil
-	case "stop":
-		if err = session.StopAny(c.ID); err != nil {
-			return err
-		}
-		fmt.Println(tr("Đã dừng và tắt tự khởi động.", "Stopped and startup disabled."))
-		return nil
-	case "run":
-		temporary := os.Getenv("XSYNC_SESSION_PASSWORD")
-		os.Unsetenv("XSYNC_SESSION_PASSWORD")
-		if c.Password == "" {
-			c.Password = temporary
-		}
-		if c.Auth == "password" && c.Password == "" {
-			c.Password, err = readPassword()
-			if err != nil {
-				return err
-			}
-		}
-		ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer cancel()
-		fmt.Printf("%s → %s:%s\n", c.LocalDir, c.Host, c.Target())
-		return session.Run(ctx, c)
-	case "preview":
-		if c.Auth == "password" && c.Password == "" {
-			c.Password, err = readPassword()
-			if err != nil {
-				return err
-			}
-		}
-		t, err := session.NewTransport(c.Host, c.Auth, c.Password)
-		if err != nil {
-			return err
-		}
-		defer t.Close()
-		var out string
-		err = interruptible(func(ctx context.Context) error { var err error; out, err = t.Sync(ctx, c, true); return err })
-		fmt.Print(safeOutput(out))
-		return err
-	case "select":
-		if session.Running(c.ID) {
-			return fmt.Errorf("%s", tr("Dừng phiên trước khi đổi dữ liệu được chọn.", "Stop the session before changing its selection."))
-		}
-		selections, err := selectData(c.LocalDir, c.Selections)
-		if err != nil {
-			return err
-		}
-		c.Selections = selections
-		return session.Save(c)
-	case "logs":
-		text, err := logsText(c)
-		if err != nil {
-			return err
-		}
-		fmt.Println(safeOutput(text))
-		return nil
+	if c.Password == "" {
+		c.Password = temporary
 	}
-	return fmt.Errorf("%s", Help())
+	if c.Auth == "password" && c.Password == "" {
+		return fmt.Errorf("%s", tr("Worker cần mật khẩu đã lưu hoặc mật khẩu tạm từ tiến trình khởi chạy.", "The worker needs a saved password or a temporary password from its launcher."))
+	}
+	return runForeground(c)
+}
+
+func runForeground(c session.Config) error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	fmt.Printf("%s → %s:%s\n", c.LocalDir, c.Host, c.Target())
+	return session.Run(ctx, c)
+}
+
+func changeSelection(c session.Config) error {
+	if session.Running(c.ID) {
+		return fmt.Errorf("%s", tr("Dừng phiên trước khi đổi dữ liệu được chọn.", "Stop the session before changing its selection."))
+	}
+	selections, err := selectData(c.LocalDir, c.Selections)
+	if err != nil {
+		return err
+	}
+	c.Selections = selections
+	return session.Save(c)
 }
 
 func New() error { return wizard() }
@@ -278,10 +146,16 @@ func sessionActions(id string) error {
 			return err
 		}
 		if mode == 1 {
-			return command([]string{"start", id})
+			return session.Start(c.ID)
 		}
 		if mode == 2 {
-			return command([]string{"run", id})
+			if c.Auth == "password" && c.Password == "" {
+				c.Password, err = readPassword()
+				if err != nil {
+					return err
+				}
+			}
+			return runForeground(c)
 		}
 		if c.Auth == "password" && c.Password == "" {
 			c.Password, err = readPassword()
@@ -290,8 +164,12 @@ func sessionActions(id string) error {
 			}
 		}
 		return session.StartDetached(c)
+	case "stop":
+		return session.StopAny(c.ID)
+	case "select":
+		return changeSelection(c)
 	default:
-		return command([]string{chosen.ID, id})
+		return fmt.Errorf("unknown session action: %s", chosen.ID)
 	}
 }
 
@@ -508,22 +386,6 @@ func wizard() error {
 	}
 }
 
-func list() error {
-	all, err := session.List()
-	if err != nil {
-		return err
-	}
-	if len(all) == 0 {
-		fmt.Println(tr("Chưa có phiên. Chạy: xsync session new", "No sessions yet. Run: xsync session new"))
-	}
-	for _, c := range all {
-		phase := phaseLabel(session.Running(c.ID), session.ReadStatus(c.ID).Phase)
-		fmt.Printf("%s [%s] %s → %s:%s\n", c.ID, phase, c.LocalDir, c.Host, c.Target())
-	}
-	return nil
-}
-
-func status(c session.Config) error { fmt.Print(statusText(c)); return nil }
 func statusText(c session.Config) string {
 	var out strings.Builder
 	s := session.ReadStatus(c.ID)

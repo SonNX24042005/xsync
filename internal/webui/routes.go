@@ -352,7 +352,7 @@ func (a *App) stopSession(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		if err := session.StopAny(id); err != nil {
-			jsonError(w, 400, fmt.Errorf("Không dừng được dịch vụ; nếu phiên chạy bằng 'session run', hãy Ctrl+C trong terminal của phiên. %w", err))
+			jsonError(w, 400, fmt.Errorf("Không dừng được dịch vụ; nếu phiên đang chạy trong terminal, hãy nhấn Ctrl+C ở terminal đó. %w", err))
 			return
 		}
 	}

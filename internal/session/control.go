@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const WorkerCommand = "_worker"
+
 type workerControl struct {
 	Nonce string `json:"nonce"`
 }
@@ -126,7 +128,7 @@ func StartDetached(c Config) error {
 		return err
 	}
 	defer log.Close()
-	cmd := exec.Command(executable, "session", "run", c.ID)
+	cmd := exec.Command(executable, WorkerCommand, c.ID)
 	cmd.Env = os.Environ()
 	if c.Auth == "password" {
 		cmd.Env = append(cmd.Env, "XSYNC_SESSION_PASSWORD="+c.Password)

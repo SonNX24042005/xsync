@@ -201,8 +201,8 @@ var translations = map[string]map[string]string{
 	LangVI: {
 		"help_usage": `xsync - Đồng bộ theo phiên
 
-Chạy xsync để mở menu terminal, xsync ui để mở web.
-Xem xsync session --help và xsync server --help.
+Chạy xsync để mở giao diện terminal và chọn thao tác bằng menu.
+Chọn Mở giao diện web để dùng trình duyệt, Cài đặt để đổi ngôn ngữ.
 Cấu hình lưu tại ~/.config/xsync/ dưới dạng JSON.`,
 
 		"version_info":                  "xsync phien ban %s (biên dịch bằng Go)\n",
@@ -266,8 +266,8 @@ Cấu hình lưu tại ~/.config/xsync/ dưới dạng JSON.`,
 	LangEN: {
 		"help_usage": `xsync - Session-based synchronization
 
-Run xsync for the terminal menu or xsync ui for the web interface.
-See xsync session --help and xsync server --help.
+Run xsync and choose an action in the terminal interface.
+Choose Open web interface to use a browser or Settings to change the language.
 Configuration is stored as JSON under ~/.config/xsync/.`,
 
 		"version_info":                  "xsync version %s (compiled with Go)\n",

@@ -79,7 +79,7 @@ func systemdQuote(s string) string {
 
 func systemdUnit(executable, id, envPath string) string {
 	return "[Unit]\nDescription=xsync folder mirror " + id + "\n\n[Service]\nType=simple\n" +
-		"ExecStart=" + systemdQuote(strings.ReplaceAll(executable, "$", "$$")) + " session run " + id + "\n" +
+		"ExecStart=" + systemdQuote(strings.ReplaceAll(executable, "$", "$$")) + " " + WorkerCommand + " " + id + "\n" +
 		"Environment=" + systemdQuote("PATH="+envPath) + "\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=20\nKillMode=control-group\nUMask=0077\n\n[Install]\nWantedBy=default.target\n"
 }
 
@@ -92,7 +92,7 @@ func launchAgent(executable, id, envPath, logPath string) string {
 	return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict><key>Label</key><string>io.xsync.` + id + `</string>
-<key>ProgramArguments</key><array><string>` + xmlText(executable) + `</string><string>session</string><string>run</string><string>` + id + `</string></array>
+<key>ProgramArguments</key><array><string>` + xmlText(executable) + `</string><string>` + WorkerCommand + `</string><string>` + id + `</string></array>
 <key>EnvironmentVariables</key><dict><key>PATH</key><string>` + xmlText(envPath) + `</string></dict>
 <key>RunAtLoad</key><true/><key>KeepAlive</key><true/><key>ThrottleInterval</key><integer>5</integer>
 <key>StandardErrorPath</key><string>` + xmlText(logPath) + `</string></dict></plist>`
@@ -122,7 +122,7 @@ func Start(id string) error {
 	switch runtime.GOOS {
 	case "linux":
 		if err = serviceCommand("systemctl", "--user", "show-environment"); err != nil {
-			return fmt.Errorf("a systemd user manager is required; use 'xsync session run %s' for a foreground session: %w", id, err)
+			return fmt.Errorf("a systemd user manager is required; choose 'Run in this terminal' in the session menu: %w", err)
 		}
 		// Lingering starts the user manager at boot even before an interactive login.
 		uid := fmt.Sprint(os.Getuid())
@@ -159,7 +159,7 @@ func Start(id string) error {
 		return serviceCommand("launchctl", "bootstrap", fmt.Sprintf("gui/%d", os.Getuid()), file)
 	case "windows":
 		script := `$ErrorActionPreference='Stop'; $user=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name; ` +
-			`$a=New-ScheduledTaskAction -Execute ` + psQuote(executable) + ` -Argument ` + psQuote("session run "+id) + `; ` +
+			`$a=New-ScheduledTaskAction -Execute ` + psQuote(executable) + ` -Argument ` + psQuote(WorkerCommand+" "+id) + `; ` +
 			`$t=New-ScheduledTaskTrigger -AtLogOn -User $user; ` +
 			`$s=New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -MultipleInstances IgnoreNew; ` +
 			`Register-ScheduledTask -TaskName ` + psQuote("xsync-"+id) + ` -Action $a -Trigger $t -Settings $s -User $user -RunLevel Limited -Force | Out-Null; Start-ScheduledTask -TaskName ` + psQuote("xsync-"+id)

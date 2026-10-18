@@ -36,36 +36,25 @@ Host my-server
 
 ## Menu terminal
 
-Chạy `xsync` để chọn **Phiên đồng bộ**, **Tạo phiên mới**, **Máy chủ** hoặc **Mở giao diện web**. Menu dùng `↑`/`↓`, `Enter`, `/` để tìm, `PgUp`/`PgDn`, `Home`/`End` và `Esc` để quay lại. Danh sách phiên/máy chủ tự làm mới mỗi 2 giây; nhấn `r` để làm mới ngay.
+Chỉ cần chạy `xsync`, sau đó chọn **Phiên đồng bộ**, **Tạo phiên mới**, **Máy chủ**, **Mở giao diện web** hoặc **Cài đặt**. Menu dùng `↑`/`↓`, `Enter`, `/` để tìm, `PgUp`/`PgDn`, `Home`/`End` và `Esc` để quay lại. Danh sách phiên/máy chủ tự làm mới mỗi 2 giây; nhấn `r` để làm mới ngay.
 
 - Phiên đồng bộ: xem chi tiết/trạng thái, bắt đầu/dừng, xem log, xem trước thay đổi, chọn lại dữ liệu khi phiên đã dừng.
 - Máy chủ: hiển thị **Đã dùng key** và **Đã lưu mật khẩu**, kiểm tra SSH key, kiểm tra kết nối SSH/rsync, lưu/thay hoặc ngừng dùng mật khẩu.
 - Tạo phiên: chọn server và xác thực → thư mục A/B → dữ liệu → xem trước/xác nhận. Có thể dùng mật khẩu đã lưu mà không nhập lại.
 - Duyệt thư mục: `Enter` mở, `Backspace` lên thư mục cha, `/` tìm, `g` nhập đường dẫn, `r` tải lại, `Space` chọn, `Tab` hoàn tất chọn dữ liệu. Remote hỗ trợ `n` tạo thư mục.
 - Chạy nền không tự khởi động tiếp tục hoạt động sau khi thoát menu. Mật khẩu không lưu được giữ trong tiến trình worker; sau khi worker dừng cần nhập lại.
+- Bắt đầu đồng bộ: chọn một phiên → **Bắt đầu đồng bộ** → chạy nền, chạy nền và tự khởi động, hoặc chạy trong terminal. Chọn **Dừng đồng bộ** để dừng phiên và tắt tự khởi động.
+- Cài đặt: đổi và lưu ngôn ngữ, xem nơi lưu dữ liệu hoặc thông tin phiên bản.
 
 ```bash
-xsync session list
-xsync session new
-xsync session status <id>
-xsync session background <id> # Chạy nền, không tự khởi động
-xsync session start <id>      # Chạy nền và bật tự khởi động
-xsync session stop <id>       # Dừng worker/dịch vụ
-xsync session run <id>        # Chạy trong terminal
-xsync session preview <id>
-xsync session select <id>
-xsync session logs <id>
-xsync server list
-xsync server check <host>
-xsync server check-key <host>
-xsync server password <host>  # Nhập mật khẩu ẩn
-xsync server disable-password <host>
-xsync config-path
+xsync
+xsync --help
+xsync --version
 ```
 
 ## Giao diện web
 
-Chạy `xsync ui`, sau đó mở **đầy đủ đường dẫn có `#token=...`** được in trong terminal. `xsync ui --port 0` chọn cổng trống; `--no-open` không tự mở trình duyệt. Mã truy cập thay đổi khi khởi động lại UI; tab/trình duyệt mới cần đường dẫn đầy đủ.
+Chạy `xsync` → **Mở giao diện web**. Trong menu này có thể chọn cổng và bật/tắt tự mở trình duyệt, rồi chọn **Khởi chạy giao diện web**. Cổng `0` tự chọn cổng trống. Mở **đầy đủ đường dẫn có `#token=...`** được in trong terminal; mã truy cập thay đổi khi khởi động lại UI và tab/trình duyệt mới cần đường dẫn đầy đủ. Nhấn `Ctrl+C` để dừng giao diện web và trở về menu.
 
 Giao diện chỉ lắng nghe trên loopback. Các danh sách phiên, máy chủ, thư mục và log cuộn trong khung riêng; màn hình hẹp có nút chuyển local/remote, máy chủ/xác thực và cấu hình/xem trước. Tạo phiên và chi tiết phiên dùng trang chính; tạo thư mục nhập ngay trong khung remote. Nhập mật khẩu tạm dùng hộp thoại.
 
