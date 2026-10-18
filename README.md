@@ -92,15 +92,3 @@ Luồng INI push/pull cũ đã được thay bằng phiên. Khi mở xsync tại
 Phiên phản chiếu cả thao tác xóa **trong phạm vi đã chọn**; dữ liệu remote ngoài phạm vi được giữ lại. Đích luôn là `B/A`. Lần đầu chạy ngay; thay đổi được gom khoảng 750 ms, đối soát mỗi 30 giây. Mỗi phiên chỉ chạy một lượt rsync tại một thời điểm.
 
 Tự khởi động dùng systemd user + linger trên Linux, LaunchAgent trên macOS và Scheduled Task trên Windows. Key có passphrase cần SSH agent dùng được trong môi trường dịch vụ. Chạy trước đăng nhập trên Linux cần quyền bật linger.
-
-## Kiểm thử và tài liệu
-
-```bash
-go test ./...
-go vet ./...
-make test-ui
-```
-
-- [Phiên đồng bộ](docs/phien_dong_bo.md)
-- [Cơ chế hoạt động](docs/co_che_hoat_dong.md)
-- [Xử lý lỗi](docs/xu_ly_ngoai_le_va_loi.md)

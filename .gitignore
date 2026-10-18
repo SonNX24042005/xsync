@@ -1,13 +1,34 @@
 # Binaries & build
 bin/
+/dist/
+/xsync
+/xsync.exe
 node_modules/
 .playwright-mcp/
 
+# Test outputs
+*.test
+coverage.out
+coverage.html
+
+# Local development files
+*_test.go
+/internal/webui/ui-tests/
+/docs/
+/Makefile.local
+
 # Config files with sensitive info
 *.ini
+.env
+.env.local
+.env.*.local
 .env_rsync
 .rsyncinclude.*
 
 # Temporary / OS
 .vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
 test/

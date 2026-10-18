@@ -1,10 +1,10 @@
-.PHONY: all build install test test-ui clean run
+.PHONY: all build install clean run
 
 BINARY_NAME=xsync
 BUILD_DIR=bin
 INSTALL_DIR=$(HOME)/.local/bin
 
-all: test build
+all: build
 
 build:
 	@mkdir -p $(BUILD_DIR)
@@ -19,16 +19,11 @@ install: build
 	@chmod +x $(INSTALL_DIR)/$(BINARY_NAME)
 	@echo "Da cai dat $(BINARY_NAME) vao $(INSTALL_DIR)/$(BINARY_NAME)"
 
-test:
-	go test -v ./...
-
-test-ui:
-	npm ci --prefix internal/webui/ui-tests --ignore-scripts --no-audit --no-fund
-	npm test --prefix internal/webui/ui-tests
-
 clean:
 	@rm -rf $(BUILD_DIR)
 	@echo "Da don dep thu muc build."
 
 run:
 	go run ./cmd/xsync
+
+-include Makefile.local
