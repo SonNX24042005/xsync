@@ -115,6 +115,13 @@ func Run(ctx context.Context, c Config) error {
 	}
 	defer lock.Close()
 	defer unlock(lock)
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cleanup, err := controlWorker(c.ID, cancel)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 	dir, _ := Dir(c.ID)
 	logger := log.New(&rotatingLog{path: filepath.Join(dir, "session.log")}, "", log.LstdFlags)
 	t, err := NewTransport(c.Host, c.Auth, c.Password)

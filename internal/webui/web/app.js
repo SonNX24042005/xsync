@@ -182,12 +182,11 @@ function renderSessions() {
   $('#stat-total').textContent = state.sessions.length; $('#nav-count').textContent = state.sessions.length;
   $('#stat-active').textContent = state.sessions.filter(s => s.running).length;
   $('#stat-errors').textContent = state.sessions.filter(s => s.running && s.status.phase === 'retrying').length;
-  $('#session-caption').textContent = state.sessions.length ? `${state.sessions.length} phiên · Cập nhật trạng thái tự động` : 'Quản lý kết nối và dữ liệu được đồng bộ';
   const list = $('#session-list'); list.replaceChildren();
   if (!state.sessions.length) {
     const empty = el('div', 'empty-state'), mark = el('div', 'empty-icon'); mark.append(icon('folder'));
     const create = button('Tạo phiên đầu tiên', 'plus', 'button primary'); create.onclick = openWizard;
-    empty.append(mark, el('h3', '', 'Một nơi cho mọi phiên đồng bộ.'), el('p', '', 'Kết nối thư mục trên máy với server của bạn. Chọn dữ liệu một lần, các thay đổi sẽ tự theo sau.'), create); list.append(empty); return;
+    empty.append(mark, el('h3', '', 'Chưa có phiên đồng bộ'), create); list.append(empty); return;
   }
   for (const session of state.sessions) {
     const row = el('article', 'session-row'), main = el('div', 'session-main'), folder = el('span', 'session-folder'); folder.append(icon('folder'));
@@ -229,6 +228,7 @@ function openWizard() {
   setPage('new'); $('#wizard-error').hidden = true; $('#host-search').value = ''; $('#ssh-password').value = '';
   $('input[name=auth][value=key]').checked = true; $('#password-fields').hidden = true; $('#save-password').checked = true;
   $('#select-all').checked = false; $('#autostart').checked = true; $('#start-now').checked = true; $('#confirm-mirror').checked = false; $('#connect-result').hidden = true;
+  setPane('connect-panes', 'hosts'); setPane('folder-panes', 'local'); setPane('review-panes', 'settings');
   renderHosts(); updateAuthFields(); renderStep(); $('#host-search').focus();
 }
 function renderHosts() {
@@ -267,9 +267,11 @@ function resetConnection() {
   state.connection = ''; state.previewOK = false; Object.values(state.browsers).forEach(b => b.dispose()); state.browsers = {}; $('#connect-result').hidden = true;
 }
 function renderStep() {
+  $('#wizard').dataset.step = state.step;
   $$('[data-page]').forEach(page => page.hidden = Number(page.dataset.page) !== state.step);
   $$('[data-step]').forEach(step => { step.classList.toggle('current', Number(step.dataset.step) === state.step); step.classList.toggle('complete', Number(step.dataset.step) < state.step); if (Number(step.dataset.step) === state.step) step.setAttribute('aria-current', 'step'); else step.removeAttribute('aria-current'); });
   $('#wizard-back').textContent = state.step ? 'Quay lại' : 'Hủy'; $('#step-caption').textContent = `Bước ${state.step + 1} trên 4`;
+  $('#wizard-route').hidden = state.step !== 1;
   const next = $('#wizard-next'); next.replaceChildren(document.createTextNode(['Kết nối và tiếp tục', 'Chọn dữ liệu', 'Xem trước thay đổi', 'Tạo phiên đồng bộ'][state.step]), icon('arrow-right')); next.disabled = state.busy;
   if (state.step === 1 && !state.browsers.local) {
     state.browsers.local = new Browser($('#local-browser'), { title: 'Thư mục local A', subtitle: 'Trên máy này', remote: false, dirsOnly: true, onChange: updateRoute });
@@ -341,7 +343,9 @@ async function preview() {
 }
 function updateRoute() {
   const a = state.browsers.local?.path, b = state.browsers.remote?.path;
-  if (a && b) $('#route-text').textContent = `${a} → ${state.host}:${join(b, basename(a))}`;
+  const route = $('#route-text');
+  route.textContent = a && b ? `${a} → ${state.host}:${join(b, basename(a))}` : 'Chọn hai thư mục để xem đường dẫn đích';
+  route.title = route.textContent;
 }
 function updateStartupHint() {
   const auth = $('input[name=auth]:checked').value;
@@ -375,7 +379,7 @@ class Browser {
     this.pathInput.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); this.go(this.pathInput.value.trim()); } });
     const refresh = button('', 'refresh', 'icon-button'); refresh.title = 'Tải lại'; refresh.setAttribute('aria-label', 'Tải lại ' + options.title); refresh.onclick = () => this.go(this.path, true); tools.append(up, this.pathInput, refresh);
     if (options.remote) {
-      const mkdir = button('Tạo thư mục', 'plus'); mkdir.setAttribute('aria-label', 'Tạo thư mục remote'); mkdir.onclick = () => this.toggleMkdir(); heading.append(mkdir);
+      const mkdir = button('Tạo thư mục', 'plus'); mkdir.title = 'Tạo thư mục remote'; mkdir.setAttribute('aria-label', 'Tạo thư mục remote'); mkdir.onclick = () => this.toggleMkdir(); heading.append(mkdir);
       this.mkdirForm = el('form', 'inline-folder-form'); this.mkdirForm.hidden = true;
       const label = el('label', '', 'Tên thư mục mới'); this.mkdirInput = el('input', 'text-input'); this.mkdirInput.id = 'new-folder-' + ++browserSequence; this.mkdirInput.required = true; this.mkdirInput.autocomplete = 'off'; this.mkdirInput.placeholder = 'Nhập tên thư mục'; label.htmlFor = this.mkdirInput.id;
       const fields = el('div', 'inline-folder-fields'), create = button('Tạo thư mục', null, 'button primary'), cancel = button('Hủy', null, 'button subtle'); create.type = 'submit';
@@ -387,6 +391,7 @@ class Browser {
     }
     const search = el('label', 'browser-search'); const input = el('input'); input.placeholder = 'Tìm trong thư mục này…'; input.setAttribute('aria-label', 'Tìm trong ' + options.title); input.oninput = () => { this.filter = input.value.toLowerCase(); this.list.scrollTop = 0; this.paintList(); }; search.append(icon('search'), input);
     this.progress = el('div', 'loading-line'); this.progress.hidden = true; this.list = el('div', 'browser-list'); this.footer = el('div', 'browser-footer');
+    this.list.tabIndex = 0; this.list.setAttribute('role', 'region'); this.list.setAttribute('aria-label', 'Danh sách ' + options.title.toLowerCase());
     this.list.addEventListener('scroll', () => { if (this.window) this.paintViewport(); });
     container.append(heading, tools); if (this.mkdirForm) container.append(this.mkdirForm); container.append(search, this.progress, this.list, this.footer);
     if (typeof ResizeObserver !== 'undefined') { this.observer = new ResizeObserver(() => { if (this.window) this.paintViewport(); }); this.observer.observe(this.list); }
@@ -477,6 +482,11 @@ function promptText(title, label, type = 'text') {
   });
 }
 
+function setPane(id, pane) {
+  $('#' + id).dataset.activePane = pane;
+  $$(`[data-pane-switch="${id}"] button`).forEach(button => button.setAttribute('aria-pressed', String(button.dataset.pane === pane)));
+}
+$$('[data-pane-switch] button').forEach(button => { button.onclick = () => setPane(button.parentElement.dataset.paneSwitch, button.dataset.pane); });
 $('#new-session').onclick = openWizard; $('#close-wizard').onclick = closeWizard; $('#host-search').oninput = renderHosts;
 $('#nav-new-session').onclick = openWizard;
 $('#nav-sessions').onclick = () => showPage('sessions');

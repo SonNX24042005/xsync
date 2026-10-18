@@ -47,16 +47,16 @@ if (-not $ChosenLang) {
     }
 }
 
-# Luu vao ~/.config/xsync/config.ini
+# Luu vao ~/.config/xsync/config.json
 $GlobalConfigDir = Join-Path $HOME ".config\xsync"
 if (-not (Test-Path $GlobalConfigDir)) {
     New-Item -ItemType Directory -Path $GlobalConfigDir -Force | Out-Null
 }
-"[settings]`r`nlanguage = $ChosenLang`r`n" | Out-File -FilePath (Join-Path $GlobalConfigDir "config.ini") -Encoding utf8
+(@{language=$ChosenLang} | ConvertTo-Json -Compress) | Out-File -FilePath (Join-Path $GlobalConfigDir "config.json") -Encoding utf8
 
 if ($ChosenLang -eq "en") {
     $MsgHeader = "INSTALLING XSYNC (PARALLEL RSYNC CLI)"
-    $MsgLangSaved = "Default language saved: English (en) in ~/.config/xsync/config.ini"
+    $MsgLangSaved = "Default language saved: English (en) in ~/.config/xsync/config.json"
     $MsgCheckRsync = "Checking rsync dependency on Windows..."
     $MsgFoundRsync = "Found rsync:"
     $MsgWarnRsync = "rsync not found. Attempting automatic installation..."
@@ -66,7 +66,7 @@ if ($ChosenLang -eq "en") {
     $MsgUsage = "Open a new PowerShell window and run: xsync --help"
 } else {
     $MsgHeader = "CAI DAT XSYNC (PARALLEL RSYNC CLI)"
-    $MsgLangSaved = "Da luu ngon ngu mac dinh: Tieng Viet (vi) tai ~/.config/xsync/config.ini"
+    $MsgLangSaved = "Da luu ngon ngu mac dinh: Tieng Viet (vi) tai ~/.config/xsync/config.json"
     $MsgCheckRsync = "Dang kiem tra cong cu phu thuoc rsync tren Windows..."
     $MsgFoundRsync = "Da tim thay rsync:"
     $MsgWarnRsync = "Chua tim thay rsync. Dang thu tu dong cai dat..."

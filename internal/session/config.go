@@ -76,8 +76,8 @@ func (c Config) Validate() error {
 	if !filepath.IsAbs(c.LocalDir) || filepath.Clean(c.LocalDir) != c.LocalDir || unsafeText(c.LocalDir) || filepath.Dir(c.LocalDir) == c.LocalDir {
 		return fmt.Errorf("local source must be an absolute folder below the filesystem root")
 	}
-	if root, err := Root(); err == nil && (c.LocalDir == root || strings.HasPrefix(c.LocalDir, root+string(os.PathSeparator))) {
-		return fmt.Errorf("session storage cannot be used as a sync source")
+	if root, err := Root(); err == nil && (c.LocalDir == filepath.Dir(root) || strings.HasPrefix(c.LocalDir, filepath.Dir(root)+string(os.PathSeparator))) {
+		return fmt.Errorf("private xsync configuration cannot be used as a sync source")
 	}
 	if !path.IsAbs(c.RemoteParent) || path.Clean(c.RemoteParent) != c.RemoteParent || unsafeText(c.RemoteParent) {
 		return fmt.Errorf("remote parent must be a clean absolute Unix path")
@@ -210,7 +210,7 @@ func (c Config) storageRelative() string {
 	if err != nil {
 		return ""
 	}
-	rel, err := filepath.Rel(c.LocalDir, root)
+	rel, err := filepath.Rel(c.LocalDir, filepath.Dir(root))
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 		return ""
 	}

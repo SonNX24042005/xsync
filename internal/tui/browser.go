@@ -27,6 +27,7 @@ type BrowserOptions struct {
 	Title, Start, Root string
 	List               fsbrowse.ListFunc
 	Mkdir              func(context.Context, string) error
+	Selected           []BrowserSelection
 	Multi              bool
 }
 
@@ -53,7 +54,11 @@ type browserModel struct {
 }
 
 func newBrowser(ctx context.Context, o BrowserOptions) browserModel {
-	return browserModel{options: o, ctx: ctx, cache: make(map[string]fsbrowse.Listing), selected: make(map[string]bool), height: 24}
+	m := browserModel{options: o, ctx: ctx, cache: make(map[string]fsbrowse.Listing), selected: make(map[string]bool), height: 24}
+	for _, item := range o.Selected {
+		m.selected[item.Path] = item.Dir
+	}
+	return m
 }
 
 func (m *browserModel) load(dir string, refresh bool) tea.Cmd {
@@ -391,14 +396,18 @@ func (m browserStart) Init() tea.Cmd { return m.initial }
 
 // ChooseMenu returns cancellation to its caller so deferred SSH cleanup can run.
 func ChooseMenu(title string, options []string, defaultIdx int) (int, error) {
-	result, err := tea.NewProgram(initialMenuModel(title, options, defaultIdx)).Run()
+	items := make([]MenuItem, len(options))
+	for i, label := range options {
+		items[i] = MenuItem{ID: fmt.Sprint(i), Label: label}
+	}
+	selected, err := ChooseItems(title, items, nil)
 	if err != nil {
 		return -1, err
 	}
-	m := result.(menuModel)
-	if m.quitting || m.selected < 0 {
-		return -1, ErrCancelled
+	for i, item := range items {
+		if item.ID == selected.ID {
+			return i, nil
+		}
 	}
-	fmt.Println(Text("Đã chọn: ", "Selected: ") + options[m.selected])
-	return m.selected, nil
+	return -1, ErrCancelled
 }

@@ -43,7 +43,7 @@ func (a *App) connect(w http.ResponseWriter, r *http.Request) {
 			jsonError(w, 500, err)
 			return
 		}
-		req.Password = effectiveCredentials(settings)[req.Host].password
+		req.Password = effectiveCredentials(settings)[req.Host].Password
 		if req.Password == "" {
 			jsonError(w, 400, fmt.Errorf("Không tìm thấy mật khẩu đã lưu cho server này. Nhập mật khẩu hoặc dùng SSH key."))
 			return
@@ -351,7 +351,7 @@ func (a *App) stopSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		if err := session.Stop(id); err != nil {
+		if err := session.StopAny(id); err != nil {
 			jsonError(w, 400, fmt.Errorf("Không dừng được dịch vụ; nếu phiên chạy bằng 'session run', hãy Ctrl+C trong terminal của phiên. %w", err))
 			return
 		}

@@ -5,7 +5,6 @@ node_modules/
 
 # Config files with sensitive info
 *.ini
-!*.ini.example
 .env_rsync
 .rsyncinclude.*
 

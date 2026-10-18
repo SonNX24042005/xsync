@@ -70,17 +70,18 @@ if [ -z "${CHOSEN_LANG}" ]; then
     esac
 fi
 
-# Lưu tùy chọn ngôn ngữ vào ~/.config/xsync/config.ini
+# Lưu tùy chọn ngôn ngữ vào ~/.config/xsync/config.json
 CONFIG_DIR="${HOME}/.config/xsync"
 mkdir -p "${CONFIG_DIR}"
-cat << EOF > "${CONFIG_DIR}/config.ini"
-[settings]
-language = ${CHOSEN_LANG}
+chmod 700 "${CONFIG_DIR}"
+umask 077
+cat << EOF > "${CONFIG_DIR}/config.json"
+{"language":"${CHOSEN_LANG}"}
 EOF
 
 if [ "${CHOSEN_LANG}" = "en" ]; then
     MSG_HEADER="=== Installing xsync ==="
-    MSG_LANG_SAVED="Default language saved: English (en) in ~/.config/xsync/config.ini"
+    MSG_LANG_SAVED="Default language saved: English (en) in ~/.config/xsync/config.json"
     MSG_CHECK_DEPS="Checking system dependencies..."
     MSG_ALL_DEPS_READY="All dependencies (rsync, sshpass) are ready!"
     MSG_CHECK_RELEASES="Checking releases on GitHub Releases..."
@@ -93,7 +94,7 @@ if [ "${CHOSEN_LANG}" = "en" ]; then
     MSG_USAGE_HINT="Open a new terminal (or run below) and type xsync:"
 else
     MSG_HEADER="=== Cài đặt công cụ xsync ==="
-    MSG_LANG_SAVED="Đã lưu cấu hình ngôn ngữ: Tiếng Việt (vi) tại ~/.config/xsync/config.ini"
+    MSG_LANG_SAVED="Đã lưu cấu hình ngôn ngữ: Tiếng Việt (vi) tại ~/.config/xsync/config.json"
     MSG_CHECK_DEPS="Kiểm tra các công cụ phụ thuộc hệ thống..."
     MSG_ALL_DEPS_READY="Tất cả phụ thuộc (rsync, sshpass) đã sẵn sàng!"
     MSG_CHECK_RELEASES="Kiểm tra bản phát hành trên GitHub Releases..."

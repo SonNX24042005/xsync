@@ -121,8 +121,8 @@ func (a *App) Handler(host string) http.Handler {
 		credentials := effectiveCredentials(settings)
 		saved := map[string]string{}
 		for _, host := range hosts {
-			if credential := credentials[host]; credential.password != "" {
-				saved[host] = credential.source
+			if credential := credentials[host]; credential.Password != "" {
+				saved[host] = credential.Source
 			}
 		}
 		jsonResponse(w, 200, map[string]any{"hosts": hosts, "servers": serverInfos(hosts, settings, credentials), "saved_passwords": saved, "cwd": filepath.ToSlash(cwd), "home": filepath.ToSlash(home), "platform": runtime.GOOS})

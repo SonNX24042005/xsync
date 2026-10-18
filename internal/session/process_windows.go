@@ -5,8 +5,13 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"syscall"
 	"time"
 )
+
+func detachCommand(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000008 | 0x00000200}
+}
 
 func prepareCommand(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {

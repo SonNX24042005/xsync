@@ -1,175 +1,106 @@
-# Công cụ đồng bộ dữ liệu xsync (Push & Pull)
+# xsync
 
-`xsync` là công cụ dòng lệnh (CLI / TUI) hiệu năng cao được viết bằng **Go (Golang)**, tự động hoá việc đồng bộ thư mục/file hai chiều giữa máy cục bộ (Local) và máy chủ từ xa (Remote Server) thông qua giao thức SSH và `rsync`.
+Đồng bộ liên tục từ thư mục local A đến `server:B/A` qua SSH và rsync. Quản lý cùng một kho phiên bằng menu terminal hoặc giao diện web.
 
-### Tính năng nổi bật:
-- **Đóng gói nhị phân độc lập (Single binary):** Không cần cài đặt môi trường Go hay Python để sử dụng.
-- **Hỗ trợ đa nền tảng:** Chạy mượt mà trên Linux, macOS và Windows (PowerShell, Git Bash, WSL).
-- **Đồng bộ song song (Parallel sync):** Phân luồng nhiều tiến trình `rsync` chạy đồng thời, tối ưu băng thông mạng.
-- **SSH Master Socket:** Tái sử dụng phiên SSH đã xác thực, giảm tối đa độ trễ bắt tay kết nối.
-- **Danh sách trắng (Whitelist):** Lọc chính xác các thư mục/tập tin cần đẩy lên (`xsync.push.ini`) hoặc tải về (`xsync.pull.ini`).
-- **Hỗ trợ đa ngôn ngữ (i18n):** Lựa chọn tiếng Anh hoặc tiếng Việt ngay khi cài đặt, tự động lưu cấu hình và hỗ trợ cờ trợ giúp `-h` / `--help`.
-- **Giao diện điều hướng hiện đại:** Điều hướng bằng phím mũi tên `↑` / `↓` mượt mà qua Bubble Tea.
-- **Live Dashboard:** Theo dõi tiến độ, tốc độ truyền tải của từng luồng theo thời gian thực trên terminal.
+## Cài đặt
 
----
+Linux/macOS:
 
-## 1. Yêu cầu hệ thống (Prerequisites)
-
-*   **Linux (Ubuntu / Debian):**
-    ```bash
-    sudo apt update && sudo apt install -y rsync sshpass
-    ```
-*   **macOS (Homebrew):**
-    ```bash
-    brew install rsync esolitos/ipa/sshpass
-    ```
-*   **Windows:**
-    *   Cài đặt `rsync` qua **Scoop** (Khuyên dùng):
-        ```powershell
-        scoop install rsync
-        ```
-    *   Hoặc sử dụng sẵn bên trong **Git Bash** / **WSL (Windows Subsystem for Linux)**.
-
----
-
-## 2. Cài đặt (Installation)
-
-### Trên Linux & macOS:
-Chạy một câu lệnh duy nhất dưới đây trên terminal:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.sh | bash
 ```
 
-### Trên Windows (PowerShell):
-Mở PowerShell và chạy lệnh:
+Windows (PowerShell):
+
 ```powershell
 irm https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.ps1 | iex
 ```
 
-> **Lưu ý:** Script cài đặt hoàn toàn độc lập, không yêu cầu cài đặt Go compiler. Script cho phép lựa chọn ngôn ngữ (tiếng Anh hoặc tiếng Việt), tự lưu cấu hình vào `~/.config/xsync/config.ini`, tự cài đặt các phụ thuộc (`rsync`, `sshpass`), tải bản binary phù hợp từ GitHub Releases/kho lưu trữ và tự cấu hình biến môi trường `PATH`.
+Hoặc build từ mã nguồn:
 
----
+```bash
+go build -o bin/xsync ./cmd/xsync
+./bin/xsync
+```
 
-## 3. Cấu hình
+Chế độ đồng bộ cần OpenSSH và rsync từ 3.1.3 ở cả local và remote. Mật khẩu cần sshpass ở local; SSH key không cần sshpass. Giao diện web được nhúng trong binary, không cần Node.js khi sử dụng.
 
-### A. Cấu hình máy chủ SSH (`~/.ssh/config`)
-`xsync` tự động nhận diện các host đã cấu hình trong file `~/.ssh/config`. Ví dụ:
+Khai báo alias máy chủ trong `~/.ssh/config`, ví dụ:
 
-```text
+```sshconfig
 Host my-server
     HostName 192.168.1.100
-    Port 22
-    User root
+    User me
+    IdentityFile ~/.ssh/id_ed25519
 ```
 
-### B. Cấu hình thư mục đồng bộ (`xsync.ini`)
-Tự động được tạo mẫu khi gọi lệnh `xsync`, hoặc bạn có thể tự tạo tại thư mục làm việc:
+## Menu terminal
 
-```ini
-[my-server]
-ssh_password = YOUR_SSH_PASSWORD
-remote_dir = /path/to/remote/directory
+Chạy `xsync` để chọn **Phiên đồng bộ**, **Tạo phiên mới**, **Máy chủ** hoặc **Mở giao diện web**. Menu dùng `↑`/`↓`, `Enter`, `/` để tìm, `PgUp`/`PgDn`, `Home`/`End` và `Esc` để quay lại. Danh sách phiên/máy chủ tự làm mới mỗi 2 giây; nhấn `r` để làm mới ngay.
 
-[settings]
-default_profile = my-server
-```
-
-### C. Cấu hình danh sách trắng (Whitelist)
-- **`xsync.push.ini`**: Danh sách thư mục/tập tin ở máy cục bộ muốn ĐẨY LÊN server.
-- **`xsync.pull.ini`**: Danh sách thư mục/tập tin ở server muốn TẢI VỀ máy cục bộ.
-
-Ví dụ nội dung file:
-```text
-data/datasets/
-models/checkpoint.pt
-scripts/train.py
-```
-
----
-
-## 4. Cách sử dụng
-
-Sau khi cài đặt xong, bạn có thể gọi lệnh `xsync` tại bất kỳ thư mục nào:
-
-```bash
-# Khởi chạy giao diện tương tác
-xsync
-
-# Xem hướng dẫn trợ giúp theo ngôn ngữ đã lưu
-xsync -h
-xsync --help
-
-# Chạy với ngôn ngữ khác tạm thời
-xsync --lang en -h
-xsync --lang vi
-
-# Thay đổi ngôn ngữ mặc định toàn cục
-xsync --set-lang en
-xsync --set-lang vi
-```
-
-Giao diện tương tác sẽ hướng dẫn bạn từng bước:
-1. **Chọn SSH host:** Dùng phím mũi tên `↑` / `↓` chọn máy chủ từ danh sách `~/.ssh/config`.
-2. **Chế độ đồng bộ:** Đẩy dữ liệu (Push) hoặc Tải dữ liệu (Pull).
-3. **Tùy chọn `--delete` (cho Push):** Xóa file thừa trên server nếu không có trong danh sách đẩy.
-4. **Dry-Run (Chạy thử):** Quét và hiển thị trước danh sách file thay đổi kèm log chi tiết mà không ảnh hưởng dữ liệu.
-5. **Xác nhận thực thi:** Chạy truyền tải song song đa luồng và hiển thị dashboard trực quan.
-
----
-
-## 5. Giao diện web local
-
-```bash
-xsync ui
-# Hoặc sau khi build trong dự án:
-./bin/xsync ui
-```
-
-Ứng dụng mở trình duyệt tại `127.0.0.1:8787`, với giao diện chọn server, SSH key/mật khẩu, duyệt thư mục local/remote, chọn dữ liệu, xem trước và quản lý phiên. Giao diện được đóng gói trong binary, không cần cài Node.js để sử dụng.
-
-- Nhấn **Tạo phiên mới** để chọn server → thư mục A/B → dữ liệu con → xác nhận.
-- Tạo phiên và xem chi tiết dùng trang chính với chữ, nút và khung thư mục lớn. Nút **Tạo thư mục** mở ô nhập ngay trong trình duyệt thư mục remote; chỉ thao tác nhập mật khẩu tạm mới dùng hộp thoại.
-- Trang **Máy chủ** hiển thị dấu **Đã dùng key** và **Đã lưu mật khẩu** cho từng host, đồng thời cho phép lưu/thay mật khẩu hoặc ngừng dùng mật khẩu cho kết nối mới. Mật khẩu từ `xsync.ini` và các phiên đã lưu cũng được nhận diện.
-- Nút **Kiểm tra key** xác thực SSH riêng, không phụ thuộc phiên bản rsync trên server. Kết nối bằng key trong trình tạo phiên cũng ghi nhớ xác thực thành công, kể cả khi bước kiểm tra rsync sau đó thất bại. Dấu key thể hiện lịch sử thành công, không bảo đảm server luôn kết nối được.
-- Nút **Kiểm tra kết nối** ưu tiên SSH key, rồi thử mật khẩu đã lưu nếu key không thành công. Kết quả báo riêng đăng nhập SSH và khả năng dùng rsync trên local/server; không tạo phiên hoặc đồng bộ dữ liệu. Cả hai nút kiểm tra đều có thể xác thực SSH khi local chưa có rsync.
-- Cấu hình máy chủ lưu tại `~/.config/xsync/servers.json` (quyền `600`, thư mục `700` trên Unix). Mật khẩu không được mã hóa; API đọc chỉ trả trạng thái và nguồn lưu. Cấu hình trên trang này ưu tiên hơn cấu hình cũ; ngừng dùng mật khẩu bỏ qua nguồn cũ cho kết nối mới, không xóa mật khẩu trong các phiên hoặc tệp cũ. Các phiên đã tạo giữ cấu hình xác thực riêng.
-- Trình duyệt thư mục có tìm kiếm tức thì, bộ nhớ đệm, nhập đường dẫn và tạo thư mục remote. Danh sách lớn chỉ vẽ các hàng đang được nhìn thấy.
-- Các phiên hiển thị trạng thái, thời điểm đồng bộ và log; có nút bắt đầu/dừng.
-- Bật **Tự chạy lại sau khi khởi động máy** để dùng dịch vụ hệ điều hành. Nếu bỏ chọn, phiên do tiến trình `xsync ui` quản lý; đóng tab vẫn đồng bộ, dừng tiến trình UI sẽ dừng các phiên tạm đó.
-- Không lưu mật khẩu vẫn có thể chạy phiên tạm; tự khởi động cần SSH key hoặc mật khẩu đã lưu.
-
-`xsync ui --port 0` chọn một cổng trống; `--no-open` chỉ in đường dẫn mà không mở trình duyệt. Khi mở lần đầu, dùng đường dẫn được lệnh in ra để xác thực giao diện. Máy chủ UI chỉ lắng nghe trên loopback và không cung cấp quyền truy cập qua mạng LAN.
-
-## 6. Phiên đồng bộ thư mục liên tục
-
-Chạy `xsync session new`, hoặc chọn **Phiên đồng bộ thư mục liên tục** trong menu `xsync`. Chế độ phiên cần rsync từ 3.1.3 ở cả local và server.
-
-1. Chọn server từ `~/.ssh/config` (hỗ trợ cả `Include`).
-2. Chọn SSH key/agent hoặc mật khẩu. Key không yêu cầu `sshpass`. Mật khẩu có thể được lưu trong cấu hình riêng của tài khoản để chạy nền; nếu không lưu thì phiên chạy trong terminal hiện tại.
-3. Chọn thư mục local **A** và thư mục chứa **B** trên server. Đích đồng bộ luôn là **B/A**, ví dụ `/home/me/project` → `server:/srv/backups/project/`.
-4. Chọn các file/thư mục con cần phản chiếu, hoặc chọn toàn bộ A. Các file mới trong thư mục đã chọn cũng được đồng bộ.
-5. Xem trước thay đổi, rồi xác nhận lưu và chạy nền. **Thao tác xóa trong phần dữ liệu đã chọn ở local cũng được áp dụng lên server.** Dữ liệu ngoài phần đã chọn được giữ lại.
-
-Trong giao diện duyệt thư mục: `↑`/`↓` di chuyển, `Enter` mở, `Backspace` lên thư mục cha, `/` tìm tức thì, `g` nhập đường dẫn, `r` tải lại, `q` hủy. Nhấn `Space` để chọn thư mục hiện tại trong bước chọn A/B. Khi chọn dữ liệu con, `Space` chọn/bỏ một mục, `a` chọn cả thư mục đang mở, `Tab` hoàn tất. Trên server có thêm `n` để tạo thư mục chứa mới. Danh sách remote được tải bất đồng bộ và lưu đệm khi quay lại.
+- Phiên đồng bộ: xem chi tiết/trạng thái, bắt đầu/dừng, xem log, xem trước thay đổi, chọn lại dữ liệu khi phiên đã dừng.
+- Máy chủ: hiển thị **Đã dùng key** và **Đã lưu mật khẩu**, kiểm tra SSH key, kiểm tra kết nối SSH/rsync, lưu/thay hoặc ngừng dùng mật khẩu.
+- Tạo phiên: chọn server và xác thực → thư mục A/B → dữ liệu → xem trước/xác nhận. Có thể dùng mật khẩu đã lưu mà không nhập lại.
+- Duyệt thư mục: `Enter` mở, `Backspace` lên thư mục cha, `/` tìm, `g` nhập đường dẫn, `r` tải lại, `Space` chọn, `Tab` hoàn tất chọn dữ liệu. Remote hỗ trợ `n` tạo thư mục.
+- Chạy nền không tự khởi động tiếp tục hoạt động sau khi thoát menu. Mật khẩu không lưu được giữ trong tiến trình worker; sau khi worker dừng cần nhập lại.
 
 ```bash
 xsync session list
+xsync session new
 xsync session status <id>
-xsync session logs <id>
+xsync session background <id> # Chạy nền, không tự khởi động
+xsync session start <id>      # Chạy nền và bật tự khởi động
+xsync session stop <id>       # Dừng worker/dịch vụ
+xsync session run <id>        # Chạy trong terminal
 xsync session preview <id>
-xsync session stop <id>    # Dừng dịch vụ và tắt tự khởi động
-xsync session select <id>  # Chọn lại dữ liệu khi phiên đã dừng
-xsync session start <id>   # Chạy nền và bật lại tự khởi động
-xsync session run <id>     # Chạy trong terminal; Ctrl+C để dừng
+xsync session select <id>
+xsync session logs <id>
+xsync server list
+xsync server check <host>
+xsync server check-key <host>
+xsync server password <host>  # Nhập mật khẩu ẩn
+xsync server disable-password <host>
+xsync config-path
 ```
 
-Trên Linux, phiên dùng dịch vụ systemd của tài khoản và bật linger để tự chạy khi boot, kể cả trước khi đăng nhập. Máy cần có systemd user manager; nếu tài khoản không có quyền bật linger, lệnh sẽ báo cách khắc phục và giữ lại cấu hình phiên. Trên macOS/Windows, phiên dùng LaunchAgent/Scheduled Task để tự chạy khi đăng nhập tài khoản. SSH key có passphrase cần agent đã mở khóa; để chạy trước đăng nhập cần một phương thức xác thực dùng được không tương tác.
+## Giao diện web
 
-Cấu hình phiên nằm trong `~/.config/xsync/sessions/<id>/`. Mật khẩu được lưu dạng văn bản trong `session.json` với quyền `0600`, thư mục `0700` trên Unix; mật khẩu không được đặt trong dòng lệnh hay log. Xem [tài liệu phiên đồng bộ](docs/phien_dong_bo.md) để biết cơ chế theo dõi, phạm vi xóa và giới hạn nền tảng.
+Chạy `xsync ui`, sau đó mở **đầy đủ đường dẫn có `#token=...`** được in trong terminal. `xsync ui --port 0` chọn cổng trống; `--no-open` không tự mở trình duyệt. Mã truy cập thay đổi khi khởi động lại UI; tab/trình duyệt mới cần đường dẫn đầy đủ.
 
-## 7. Tài liệu kỹ thuật
+Giao diện chỉ lắng nghe trên loopback. Các danh sách phiên, máy chủ, thư mục và log cuộn trong khung riêng; màn hình hẹp có nút chuyển local/remote, máy chủ/xác thực và cấu hình/xem trước. Tạo phiên và chi tiết phiên dùng trang chính; tạo thư mục nhập ngay trong khung remote. Nhập mật khẩu tạm dùng hộp thoại.
 
-- [Các trường hợp xử lý ngoại lệ và lỗi trong xsync](docs/xu_ly_ngoai_le_va_loi.md)
+Terminal và web đọc/ghi chung các phiên, mật khẩu và dấu key. Kiểm tra key chỉ xác thực SSH; kiểm tra kết nối báo riêng SSH và khả năng đồng bộ bằng rsync. Dấu key ghi nhận lịch sử thành công, không bảo đảm máy luôn kết nối được.
+
+Các phiên tạm do UI khởi chạy tiếp tục đồng bộ khi đóng tab, nhưng dừng khi tiến trình UI dừng. Worker nền do terminal khởi chạy tiếp tục sau khi thoát terminal. Cả hai đều xuất hiện trong cùng danh sách phiên.
+
+## Lưu trữ
+
+| Dữ liệu | Đường dẫn |
+|---|---|
+| Cấu hình và phần dữ liệu được chọn | `~/.config/xsync/sessions/<id>/session.json` |
+| Trạng thái, log và điều khiển worker | Cùng thư mục của phiên |
+| Mật khẩu chung và lịch sử key | `~/.config/xsync/servers.json` |
+| Ngôn ngữ | `~/.config/xsync/config.json` |
+| Bản sao cấu hình cũ | `~/.config/xsync/migrations/<thời điểm>-<mã>/` |
+
+Cấu hình xác thực của phiên đã tạo được giữ riêng; thay mật khẩu máy chủ áp dụng cho kết nối mới. Mật khẩu lưu dạng văn bản, không được trả về từ API đọc hay in trong list/status/log. Thư mục riêng dùng quyền `0700`, tệp dùng `0600` trên Unix. Ghi cấu hình máy chủ có khóa giữa các tiến trình để terminal và web không ghi đè thay đổi của nhau.
+
+Luồng INI push/pull cũ đã được thay bằng phiên. Khi mở xsync tại một thư mục còn `xsync.ini`, `xsync.push.ini`, `xsync.pull.ini`, ứng dụng nhập mật khẩu chưa có vào kho chung, sao lưu và kiểm tra bản sao trước khi bỏ tệp cũ. Cấu hình ngôn ngữ INI cũng chuyển sang JSON. Không ghi đè mật khẩu đã cấu hình rõ ràng; không tự tạo hoặc chạy phiên từ whitelist cũ. Các phiên hiện có được giữ nguyên.
+
+## Phạm vi đồng bộ và tự khởi động
+
+Phiên phản chiếu cả thao tác xóa **trong phạm vi đã chọn**; dữ liệu remote ngoài phạm vi được giữ lại. Đích luôn là `B/A`. Lần đầu chạy ngay; thay đổi được gom khoảng 750 ms, đối soát mỗi 30 giây. Mỗi phiên chỉ chạy một lượt rsync tại một thời điểm.
+
+Tự khởi động dùng systemd user + linger trên Linux, LaunchAgent trên macOS và Scheduled Task trên Windows. Key có passphrase cần SSH agent dùng được trong môi trường dịch vụ. Chạy trước đăng nhập trên Linux cần quyền bật linger.
+
+## Kiểm thử và tài liệu
+
+```bash
+go test ./...
+go vet ./...
+make test-ui
+```
+
+- [Phiên đồng bộ](docs/phien_dong_bo.md)
 - [Cơ chế hoạt động](docs/co_che_hoat_dong.md)
-- [Phiên đồng bộ thư mục liên tục](docs/phien_dong_bo.md)
+- [Xử lý lỗi](docs/xu_ly_ngoai_le_va_loi.md)
