@@ -108,7 +108,11 @@ func (t *Transport) command(ctx context.Context, args ...string) *exec.Cmd {
 }
 
 func (t *Transport) Run(ctx context.Context, script string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	return t.runWithTimeout(ctx, script, 20*time.Second)
+}
+
+func (t *Transport) runWithTimeout(ctx context.Context, script string, timeout time.Duration) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := t.command(ctx, append(t.args(), "--", t.Host, script)...)
 	var stderr bytes.Buffer
@@ -216,6 +220,10 @@ func (t *Transport) RsyncShell() string {
 
 // Sync mirrors only the configured selection inside B/A, never B or its siblings.
 func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error) {
+	if dry {
+		ctx = context.WithValue(ctx, progressKey{}, nil)
+	}
+	reportProgress(ctx, Progress{Stage: "connecting"})
 	if err := c.Validate(); err != nil {
 		return "", err
 	}
@@ -233,12 +241,33 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 	if _, err := t.Run(ctx, "test -d "+ShellQuote(c.RemoteParent)+" && test ! -L "+target+" && { test ! -e "+target+" || test -d "+target+"; }"); err != nil {
 		return "", fmt.Errorf("remote parent is unavailable or target is a file/symlink: %w", err)
 	}
+	reportProgress(ctx, Progress{Stage: "scanning"})
+	plan, err := prepareGitPlan(ctx, c, dry)
+	if err != nil {
+		return "", err
+	}
+	effective := c
+	var prefix string
+	if plan != nil {
+		defer plan.release()
+		if plan.repo != "" {
+			effective = plan.effective
+			// The previous selected root remains managed until a successful relocation finishes.
+			effective.Selections = append(append([]Selection(nil), effective.Selections...), plan.cleanup...)
+		}
+		prefix, err = plan.moveRemote(ctx, t, dry)
+		if err != nil {
+			return prefix, err
+		}
+	}
 	args := []string{"-az", "--modify-window=-1", "--protect-args", "--delete-delay", "--partial", "--timeout=60",
 		"--itemize-changes", "--out-format=%i %n%L", "-e", t.RsyncShell()}
 	if dry {
 		args = append(args, "--dry-run")
+	} else {
+		args = append(args, "--info=progress2", "--outbuf=L", "--no-human-readable")
 	}
-	if rules := c.Filters(); len(rules) > 0 {
+	if rules := effective.Filters(); len(rules) > 0 {
 		f, err := os.CreateTemp("", "xsync-filter-")
 		if err != nil {
 			return "", err
@@ -259,21 +288,33 @@ func (t *Transport) Sync(ctx context.Context, c Config, dry bool) (string, error
 	cmd := exec.CommandContext(ctx, "rsync", args...)
 	cmd.WaitDelay = 2 * time.Second
 	prepareCommand(cmd)
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	if t.Auth == "password" {
-		cmd.Env = append(os.Environ(), "SSHPASS="+t.Password)
+		cmd.Env = append(cmd.Env, "SSHPASS="+t.Password)
 	}
 	// Keep memory bounded for large initial uploads. Full rsync stdout is not retained.
 	out := &tailBuffer{limit: 64 * 1024}
-	cmd.Stdout, cmd.Stderr = out, out
+	stream := &progressOutput{ctx: ctx, log: out}
+	cmd.Stdout, cmd.Stderr = stream, stream
+	reportProgress(ctx, Progress{Stage: "transferring"})
 	err = cmd.Run()
+	stream.flush()
 	text := out.String()
 	if t.Password != "" {
 		text = strings.ReplaceAll(text, t.Password, "[redacted]")
 	}
 	if err != nil {
-		return text, fmt.Errorf("rsync: %w: %s", err, text)
+		return prefix + text, fmt.Errorf("rsync: %w: %s", err, text)
 	}
-	return text, nil
+	if !dry {
+		finalizing := stream.last
+		finalizing.Stage, finalizing.Rate, finalizing.ETA = "finishing", "", ""
+		reportProgress(ctx, finalizing)
+		if err := plan.finish(ctx); err != nil {
+			return prefix + text, err
+		}
+	}
+	return prefix + text, nil
 }
 
 func rsyncLocalPath(name string) string {

@@ -193,7 +193,9 @@ function renderSessions() {
     const title = el('div'), source = el('p', '', session.local_dir); source.title = session.local_dir;
     title.append(el('h3', '', basename(session.local_dir)), source); main.append(folder, title);
     const host = el('div', 'session-host'); host.append(el('strong', '', session.host), el('small', '', session.auth === 'key' ? 'Xác thực bằng SSH key' : 'Xác thực bằng mật khẩu'));
-    const status = el('div'); status.append(badge(session), el('small', 'last-sync', timeLabel(session.status.last_success)));
+    const status = el('div', 'session-status'); status.append(badge(session));
+    const progress = syncProgress(session); if (progress) status.append(progress);
+    status.append(el('small', 'last-sync', timeLabel(session.status.last_success)));
     const actions = el('div', 'row-actions'), toggle = button(session.running ? 'Dừng' : 'Bắt đầu', session.running ? 'pause' : 'play');
     toggle.onclick = () => controlSession(session, toggle);
     const details = button('Chi tiết', null, 'button subtle'); details.onclick = () => openDetails(session.id);
@@ -228,6 +230,7 @@ function openWizard() {
   setPage('new'); $('#wizard-error').hidden = true; $('#host-search').value = ''; $('#ssh-password').value = '';
   $('input[name=auth][value=key]').checked = true; $('#password-fields').hidden = true; $('#save-password').checked = true;
   $('#select-all').checked = false; $('#autostart').checked = true; $('#start-now').checked = true; $('#confirm-mirror').checked = false; $('#connect-result').hidden = true;
+  $('input[name="selection-mode"][value="include"]').checked = true;
   setPane('connect-panes', 'hosts'); setPane('folder-panes', 'local'); setPane('review-panes', 'settings');
   renderHosts(); updateAuthFields(); renderStep(); $('#host-search').focus();
 }
@@ -289,10 +292,12 @@ function renderStep() {
   if (state.step === 3) {
     $('#review-source').textContent = state.browsers.local.path; $('#review-host').textContent = state.host;
     $('#review-target').textContent = join(state.browsers.remote.path, basename(state.browsers.local.path)); updateStartupHint();
+    $('#review-scope').textContent = scopeDescription(selectionMode(), [...state.selected.keys()]);
+    $('#scope-notice').textContent = selectionMode() === 'exclude' ? 'Đồng bộ cả mục mới và thao tác xóa ngoài danh sách loại trừ. Dữ liệu bị loại trừ trên remote được giữ nguyên.' : 'Chỉ đồng bộ và phản chiếu thao tác xóa trong mục đã chọn. Mục mới ngoài phạm vi này không được đồng bộ.';
   }
 }
 function draft() {
-  return { connection: state.connection, local_dir: state.browsers.local.path, remote_parent: state.browsers.remote.path, selections: [...state.selected].map(([path, directory]) => ({ path, directory })), save_password: $('#save-password').checked, start: $('#start-now').checked, autostart: $('#autostart').checked };
+  return { connection: state.connection, local_dir: state.browsers.local.path, remote_parent: state.browsers.remote.path, selections: [...state.selected].map(([path, directory]) => ({ path, directory })), selection_mode: selectionMode(), save_password: $('#save-password').checked, start: $('#start-now').checked, autostart: $('#autostart').checked };
 }
 async function nextStep() {
   if (state.busy) return;
@@ -317,7 +322,7 @@ async function nextStep() {
       if (parentPath(state.browsers.local.path) === state.browsers.local.path) throw new Error('Chọn một thư mục bên dưới gốc ổ đĩa.');
       state.step = 2; renderStep();
     } else if (state.step === 2) {
-      if (!state.selected.size) throw new Error('Chọn ít nhất một file/thư mục, hoặc chọn toàn bộ thư mục A.');
+      if (selectionMode() === 'include' && !state.selected.size) throw new Error('Chọn ít nhất một file/thư mục, hoặc chọn toàn bộ thư mục A.');
       state.step = 3; state.previewOK = false; $('#confirm-mirror').checked = false; renderStep(); await preview();
     } else {
       if (!state.previewOK) throw new Error('Cần xem trước thay đổi thành công trước khi tạo phiên.');
@@ -362,9 +367,16 @@ function toggleSelection(relative, dir) {
   renderSelections(); state.browsers.selection?.paintList();
 }
 function renderSelections() {
-  $('#select-all').checked = state.selected.has('.'); $('#selection-count').textContent = `${state.selected.size} mục đã chọn`;
+  const excluded = selectionMode() === 'exclude';
+  $('#select-all').parentElement.hidden = excluded;
+  $('#select-all').checked = state.selected.has('.'); $('#selection-count').textContent = excluded ? (state.selected.size ? `${state.selected.size} mục loại trừ` : 'Không loại trừ mục nào: đồng bộ toàn bộ') : `${state.selected.size} mục đã chọn`;
   const chips = $('#selected-chips'); chips.replaceChildren();
   for (const [path] of state.selected) { const chip = el('span', 'chip', path === '.' ? 'Toàn bộ thư mục A' : path); const remove = button('×', null); remove.setAttribute('aria-label', 'Bỏ chọn ' + path); remove.onclick = () => { state.selected.delete(path); renderSelections(); state.browsers.selection?.paintList(); }; chip.append(remove); chips.append(chip); }
+}
+function selectionMode() { return $('input[name="selection-mode"]:checked').value; }
+function scopeDescription(mode, paths) {
+  if (mode === 'exclude') return paths.length ? 'Đồng bộ tất cả, trừ: ' + paths.join(', ') : 'Đồng bộ toàn bộ, kể cả mục mới';
+  return 'Chỉ đồng bộ: ' + paths.map(path => path === '.' ? 'Toàn bộ thư mục' : path).join(', ');
 }
 
 let browserSequence = 0;
@@ -425,7 +437,7 @@ class Browser {
       const space = el('div', 'browser-virtual'); space.style.height = `${this.filtered.length * this.rowHeight}px`;
       this.window = el('div', 'browser-window'); space.append(this.window); this.list.append(space); this.list.scrollTop = scroll; this.paintViewport();
     }
-    this.footer.replaceChildren(el('span', '', `${this.filtered.length} mục`), el('span', '', this.options.selectable ? 'Chọn ô để đồng bộ · Mở thư mục để chọn sâu hơn' : 'Thư mục đang mở được dùng làm đích chọn'));
+    this.footer.replaceChildren(el('span', '', `${this.filtered.length} mục`), el('span', '', this.options.selectable ? (selectionMode() === 'exclude' ? 'Chọn ô để loại trừ · Mở thư mục để chọn sâu hơn' : 'Chọn ô để đồng bộ · Mở thư mục để chọn sâu hơn') : 'Thư mục đang mở được dùng làm đích chọn'));
   }
   paintViewport() {
     const start = Math.max(0, Math.floor(this.list.scrollTop / this.rowHeight) - 4), end = Math.min(this.filtered.length, start + Math.ceil((this.list.clientHeight || 420) / this.rowHeight) + 10);
@@ -464,11 +476,37 @@ class Browser {
 }
 
 function openDetails(id) { if (state.page === 'new') discardWizard(); state.detail = id; setPage('details'); renderDetail(); $('#details-title').focus(); refreshLogs().catch(err => toast(err.message, true)); }
+function syncProgress(session, detailed = false) {
+  const p = session.status.progress; if (!p) return null;
+  const labels = { connecting: 'Đang kết nối', scanning: 'Đang quét thay đổi', renaming: 'Đang xử lý đổi tên', transferring: 'Đang đồng bộ', finishing: 'Đang hoàn tất', completed: 'Đã đồng bộ' };
+  const interrupted = session.status.phase === 'retrying' || (!session.running && p.stage !== 'completed');
+  const label = interrupted ? (session.running ? 'Chờ thử lại' : 'Đã dừng') : (labels[p.stage] || 'Đang chuẩn bị');
+  const percent = Number.isFinite(p.percent) ? Math.max(0, Math.min(p.stage === 'completed' ? 100 : 99, p.percent)) : null;
+  const box = el('div', `sync-progress${detailed ? ' detailed' : ''}${interrupted ? ' interrupted' : ''}`);
+  const heading = el('div', 'progress-heading');
+  heading.append(el('span', '', label), el('span', 'progress-percent', percent === null ? '' : `${p.estimated ? '~' : ''}${percent}%`)); box.append(heading);
+  const track = el('div', `progress-track${percent === null ? ' indeterminate' : ''}`); track.setAttribute('role', 'progressbar'); track.setAttribute('aria-label', label); track.setAttribute('aria-valuemin', '0'); track.setAttribute('aria-valuemax', '100');
+  if (percent !== null) track.setAttribute('aria-valuenow', String(percent));
+  const fill = el('span', 'progress-fill'); if (percent !== null) fill.style.width = `${percent}%`; track.append(fill); box.append(track);
+  const parts = [];
+  if (p.bytes_processed > 0) {
+    let bytes = p.bytes_processed, unit = 0; const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    while (bytes >= 1024 && unit < units.length - 1) { bytes /= 1024; unit++; }
+    parts.push(`${bytes.toLocaleString('vi-VN', { maximumFractionDigits: unit ? 1 : 0 })} ${units[unit]} đã xử lý`);
+  }
+  if (!interrupted && p.stage === 'transferring') { if (p.rate) parts.push(p.rate); if (p.eta) parts.push(`Còn khoảng ${p.eta}`); }
+  if (p.stage === 'renaming' && p.total > 0) parts.push(`${p.checked}/${p.total} mục`);
+  if (detailed && p.transfers > 0) parts.push(`${p.transfers} tệp đã truyền`);
+  if (parts.length) box.append(el('small', 'progress-metrics', parts.join(' · ')));
+  return box;
+}
 function renderDetail() {
   const session = state.sessions.find(s => s.id === state.detail); if (!session) return;
   $('#details-title').textContent = basename(session.local_dir);
-  const content = $('#detail-content'); content.replaceChildren(); const grid = el('dl', 'detail-grid');
-  const pairs = [['Server', session.host], ['Trạng thái', phaseLabel(session)[0]], ['Thư mục local', session.local_dir], ['Thư mục remote', session.target], ['Lần đồng bộ thành công', timeLabel(session.status.last_success)], ['Cách xác thực', session.auth === 'key' ? 'SSH key / agent' : session.password_saved ? 'Mật khẩu đã lưu' : 'Mật khẩu không lưu'], ['Phạm vi', session.selections.map(s => s.path === '.' ? 'Toàn bộ thư mục' : s.path).join(', ')], ['Mã phiên', session.id]];
+  const content = $('#detail-content'); content.replaceChildren();
+  const progress = syncProgress(session, true); if (progress) content.append(progress);
+  const grid = el('dl', 'detail-grid');
+  const pairs = [['Server', session.host], ['Trạng thái', phaseLabel(session)[0]], ['Thư mục local', session.local_dir], ['Thư mục remote', session.target], ['Lần đồng bộ thành công', timeLabel(session.status.last_success)], ['Cách xác thực', session.auth === 'key' ? 'SSH key / agent' : session.password_saved ? 'Mật khẩu đã lưu' : 'Mật khẩu không lưu'], ['Phạm vi', scopeDescription(session.selection_mode || 'include', (session.selections || []).map(s => s.path))], ['Mã phiên', session.id]];
   for (const [key, value] of pairs) { const group = el('div'); group.append(el('dt', '', key), el('dd', '', value)); grid.append(group); } content.append(grid);
   if (session.status.last_error) content.append(el('div', 'detail-error', session.status.last_error));
   if (!session.running && (session.auth === 'key' || session.password_saved)) { const actions = el('div', 'log-heading'), start = button('Chạy nền và bật tự khởi động', 'play'); start.onclick = () => controlSession(session, start, true); actions.append(start); content.append(actions); }
@@ -500,6 +538,10 @@ $$('input[name=auth]').forEach(input => input.onchange = () => { resetConnection
 $('#ssh-password').oninput = resetConnection;
 $('#use-saved-password').onchange = () => { resetConnection(); $('#ssh-password').value = ''; updateAuthFields(); };
 $('#select-all').onchange = () => { if ($('#select-all').checked) { state.selected.clear(); state.selected.set('.', true); } else state.selected.delete('.'); renderSelections(); state.browsers.selection?.paintList(); };
+$$('input[name="selection-mode"]').forEach(input => input.onchange = () => {
+  state.selected.clear(); state.previewOK = false; $('#confirm-mirror').checked = false;
+  renderSelections(); state.browsers.selection?.paintList();
+});
 $('#start-now').onchange = updateStartupHint; $('#save-password').onchange = updateStartupHint;
 $('#refresh-preview').onclick = () => preview().catch(err => toast(err.message, true));
 $('#close-details').onclick = () => showPage('sessions'); $('#refresh-logs').onclick = () => refreshLogs().catch(err => toast(err.message, true));

@@ -37,25 +37,38 @@ func RunWorker(id string) error {
 	if c.Auth == "password" && c.Password == "" {
 		return fmt.Errorf("%s", tr("Worker cần mật khẩu đã lưu hoặc mật khẩu tạm từ tiến trình khởi chạy.", "The worker needs a saved password or a temporary password from its launcher."))
 	}
-	return runForeground(c)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return session.Run(ctx, c)
 }
 
 func runForeground(c session.Config) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	fmt.Printf("%s → %s:%s\n", c.LocalDir, c.Host, c.Target())
-	return session.Run(ctx, c)
+	done := make(chan error, 1)
+	go func() { done <- session.Run(ctx, c); cancel() }()
+	err := tui.ShowLiveText(ctx, tr("Đồng bộ trực tiếp · Esc để dừng", "Live sync · Esc to stop"), func() string { return statusText(c) })
+	wasCancelled := ctx.Err() != nil
+	cancel()
+	if runErr := <-done; runErr != nil {
+		return runErr
+	}
+	if wasCancelled {
+		return nil
+	}
+	return err
 }
 
 func changeSelection(c session.Config) error {
 	if session.Running(c.ID) {
 		return fmt.Errorf("%s", tr("Dừng phiên trước khi đổi dữ liệu được chọn.", "Stop the session before changing its selection."))
 	}
-	selections, err := selectData(c.LocalDir, c.Selections)
+	mode, selections, err := selectScope(c)
 	if err != nil {
 		return err
 	}
 	c.Selections = selections
+	c.SelectionMode = mode
 	return session.Save(c)
 }
 
@@ -68,7 +81,11 @@ func sessionItems() ([]tui.MenuItem, error) {
 	}
 	items := []tui.MenuItem{{ID: "new", Label: tr("Tạo phiên mới", "Create session")}, {ID: "servers", Label: tr("Máy chủ", "Servers")}}
 	for _, c := range all {
-		phase := phaseLabel(session.Running(c.ID), session.ReadStatus(c.ID).Phase)
+		status := session.ReadStatus(c.ID)
+		phase := phaseLabel(session.Running(c.ID), status.Phase)
+		if status.Progress != nil {
+			phase += " · " + progressSummary(status.Progress)
+		}
 		items = append(items, tui.MenuItem{ID: c.ID, Label: fmt.Sprintf("[%s] %s · %s → %s:%s", phase, filepath.Base(c.LocalDir), c.LocalDir, c.Host, c.Target())})
 	}
 	return items, nil
@@ -115,7 +132,7 @@ func sessionActions(id string) error {
 	}
 	switch chosen.ID {
 	case "status":
-		return tui.ShowText(c.ID, statusText(c))
+		return tui.ShowLiveText(context.Background(), c.ID, func() string { return statusText(c) })
 	case "logs":
 		text, err := logsText(c)
 		if err != nil {
@@ -186,15 +203,34 @@ func readPassword() (string, error) {
 	return string(password), nil
 }
 
-func selectData(root string, initial ...[]session.Selection) ([]session.Selection, error) {
+func selectScope(c session.Config) (string, []session.Selection, error) {
+	items := []tui.MenuItem{{ID: session.SelectionInclude, Label: tr("Chỉ đồng bộ mục đã chọn", "Sync selected items only")}, {ID: session.SelectionExclude, Label: tr("Đồng bộ tất cả, trừ mục đã chọn", "Sync everything except selected items")}}
+	if c.Mode() == session.SelectionExclude {
+		items[0], items[1] = items[1], items[0]
+	}
+	choice, err := tui.ChooseItems(tr("Chế độ đồng bộ", "Sync mode"), items, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	initial := c.Selections
+	if choice.ID != c.Mode() {
+		initial = nil
+	}
+	selected, err := selectData(c.LocalDir, choice.ID, initial)
+	return choice.ID, selected, err
+}
+
+func selectData(root, mode string, initial []session.Selection) ([]session.Selection, error) {
 	var selected []tui.BrowserSelection
-	if len(initial) > 0 {
-		for _, s := range initial[0] {
-			selected = append(selected, tui.BrowserSelection{Path: s.Path, Dir: s.Dir})
-		}
+	for _, s := range initial {
+		selected = append(selected, tui.BrowserSelection{Path: s.Path, Dir: s.Dir})
+	}
+	title := tr("Chọn file/thư mục con cần đồng bộ; a để chọn tất cả", "Select files/subfolders to sync; a selects everything")
+	if mode == session.SelectionExclude {
+		title = tr("Chọn mục loại trừ; Tab để đồng bộ tất cả nếu không loại trừ mục nào", "Select exclusions; Tab syncs everything if nothing is excluded")
 	}
 	_, items, err := tui.Browse(context.Background(), tui.BrowserOptions{
-		Title: tr("Chọn file/thư mục con cần phản chiếu; a để chọn tất cả", "Select files/subfolders to mirror; a selects everything"),
+		Title: title, AllowEmpty: mode == session.SelectionExclude, ExcludeRoot: mode == session.SelectionExclude,
 		Start: filepath.ToSlash(root), Root: filepath.ToSlash(root), List: fsbrowse.Local, Multi: true, Selected: selected,
 	})
 	if err != nil {
@@ -323,7 +359,7 @@ func wizard() error {
 			c.RemoteParent = parent
 			step = 2
 		case 2:
-			selections, err := selectData(c.LocalDir, c.Selections)
+			mode, selections, err := selectScope(c)
 			if errors.Is(err, tui.ErrCancelled) {
 				step = 1
 				continue
@@ -332,6 +368,7 @@ func wizard() error {
 				return err
 			}
 			c.Selections = selections
+			c.SelectionMode = mode
 			step = 3
 		case 3:
 			if err = c.Validate(); err != nil {
@@ -346,7 +383,7 @@ func wizard() error {
 			if err != nil {
 				return err
 			}
-			if err = tui.ShowText(tr("4/4 · Xem trước thay đổi", "4/4 · Preview changes"), c.LocalDir+" → "+c.Host+":"+c.Target()+"\n\n"+preview); err != nil {
+			if err = tui.ShowText(tr("4/4 · Xem trước thay đổi", "4/4 · Preview changes"), c.LocalDir+" → "+c.Host+":"+c.Target()+"\n"+scopeLabel(c)+"\n\n"+preview); err != nil {
 				return err
 			}
 			actions := []tui.MenuItem{{ID: "background", Label: tr("Lưu và chạy nền, không tự khởi động", "Save and run in background without startup")}}
@@ -392,6 +429,36 @@ func statusText(c session.Config) string {
 	phase := phaseLabel(session.Running(c.ID), s.Phase)
 	fmt.Fprintf(&out, "%s [%s]\n%s → %s:%s\n", c.ID, phase, c.LocalDir, c.Host, c.Target())
 	fmt.Fprintf(&out, "%s: %s\n", tr("Xác thực", "Authentication"), c.Auth)
+	fmt.Fprintf(&out, "%s: %s\n", tr("Chế độ", "Mode"), scopeLabel(c))
+	if p := s.Progress; p != nil {
+		fmt.Fprintf(&out, "\n%s\n", progressSummary(p))
+		if p.Percent != nil {
+			percent := max(0, min(100, *p.Percent))
+			filled := percent / 5
+			fmt.Fprintf(&out, "[%s%s]\n", strings.Repeat("=", filled), strings.Repeat("·", 20-filled))
+		}
+		if p.BytesProcessed > 0 {
+			fmt.Fprintf(&out, "%s: %s\n", tr("Dữ liệu đã xử lý", "Data processed"), byteLabel(p.BytesProcessed))
+		}
+		if s.Phase == "syncing" && p.Stage == "transferring" {
+			if p.Rate != "" {
+				fmt.Fprintf(&out, "%s: %s\n", tr("Tốc độ", "Rate"), p.Rate)
+			}
+			if p.ETA != "" {
+				fmt.Fprintf(&out, "%s: ~%s\n", tr("Thời gian còn lại", "Time remaining"), p.ETA)
+			}
+		}
+		if p.Stage == "renaming" {
+			fmt.Fprintf(&out, "%d/%d %s\n", p.Checked, p.Total, tr("mục", "items"))
+		}
+		if p.Transfers > 0 {
+			fmt.Fprintf(&out, "%s: %d\n", tr("Tệp đã truyền", "Files transferred"), p.Transfers)
+		}
+		out.WriteString("\n")
+	}
+	if c.Mode() == session.SelectionExclude {
+		out.WriteString(tr("Loại trừ:\n", "Excluded:\n"))
+	}
 	for _, item := range c.Selections {
 		fmt.Fprintf(&out, "  • %s\n", item.Path)
 	}
@@ -402,6 +469,40 @@ func statusText(c session.Config) string {
 		fmt.Fprintf(&out, "%s: %s\n", tr("Lỗi gần nhất", "Latest error"), safeOutput(s.LastError))
 	}
 	return out.String()
+}
+
+func scopeLabel(c session.Config) string {
+	if c.Mode() == session.SelectionExclude {
+		return tr("Đồng bộ tất cả, trừ mục đã chọn", "Sync everything except selected items")
+	}
+	return tr("Chỉ đồng bộ mục đã chọn", "Sync selected items only")
+}
+
+func progressSummary(p *session.Progress) string {
+	labels := map[string]string{
+		"connecting": tr("Đang kết nối", "Connecting"), "scanning": tr("Đang quét", "Scanning"),
+		"renaming": tr("Đang xử lý đổi tên", "Processing renames"), "transferring": tr("Đang đồng bộ", "Syncing"),
+		"finishing": tr("Đang hoàn tất", "Finishing"), "completed": tr("Đã đồng bộ", "Synced"),
+	}
+	label := labels[p.Stage]
+	if p.Percent != nil {
+		estimate := ""
+		if p.Estimated {
+			estimate = "~"
+		}
+		label += fmt.Sprintf(" %s%d%%", estimate, max(0, min(100, *p.Percent)))
+	}
+	return label
+}
+
+func byteLabel(n int64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	value, unit := float64(n), 0
+	for value >= 1024 && unit < len(units)-1 {
+		value /= 1024
+		unit++
+	}
+	return fmt.Sprintf("%.1f %s", value, units[unit])
 }
 
 func safeOutput(s string) string {

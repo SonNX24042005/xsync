@@ -166,13 +166,14 @@ func (a *App) mkdir(w http.ResponseWriter, r *http.Request) {
 }
 
 type draft struct {
-	Connection   string              `json:"connection"`
-	LocalDir     string              `json:"local_dir"`
-	RemoteParent string              `json:"remote_parent"`
-	Selections   []session.Selection `json:"selections"`
-	SavePassword bool                `json:"save_password"`
-	Start        bool                `json:"start"`
-	Autostart    bool                `json:"autostart"`
+	Connection    string              `json:"connection"`
+	LocalDir      string              `json:"local_dir"`
+	RemoteParent  string              `json:"remote_parent"`
+	Selections    []session.Selection `json:"selections"`
+	SelectionMode string              `json:"selection_mode"`
+	SavePassword  bool                `json:"save_password"`
+	Start         bool                `json:"start"`
+	Autostart     bool                `json:"autostart"`
 }
 
 func (d draft) config(c *connection) (session.Config, error) {
@@ -184,7 +185,7 @@ func (d draft) config(c *connection) (session.Config, error) {
 	if err != nil {
 		return session.Config{}, err
 	}
-	result := session.Config{ID: session.NewID(), Host: c.transport.Host, Auth: c.transport.Auth, Password: c.transport.Password, LocalDir: local, RemoteParent: d.RemoteParent, Selections: d.Selections, CreatedAt: time.Now()}
+	result := session.Config{ID: session.NewID(), Host: c.transport.Host, Auth: c.transport.Auth, Password: c.transport.Password, LocalDir: local, RemoteParent: d.RemoteParent, Selections: d.Selections, SelectionMode: d.SelectionMode, CreatedAt: time.Now()}
 	return result, result.Validate()
 }
 func (a *App) preview(w http.ResponseWriter, r *http.Request) {
@@ -296,7 +297,7 @@ func (a *App) listSessions(w http.ResponseWriter, r *http.Request) {
 		a.mu.Lock()
 		owned := a.workers[c.ID] != nil
 		a.mu.Unlock()
-		result = append(result, map[string]any{"id": c.ID, "host": c.Host, "auth": c.Auth, "password_saved": c.Password != "", "local_dir": c.LocalDir, "remote_parent": c.RemoteParent, "target": c.Target(), "selections": c.Selections, "created_at": c.CreatedAt, "running": running, "managed": owned, "status": state})
+		result = append(result, map[string]any{"id": c.ID, "host": c.Host, "auth": c.Auth, "password_saved": c.Password != "", "local_dir": c.LocalDir, "remote_parent": c.RemoteParent, "target": c.Target(), "selections": c.Selections, "selection_mode": c.Mode(), "created_at": c.CreatedAt, "running": running, "managed": owned, "status": state})
 	}
 	jsonResponse(w, 200, result)
 }

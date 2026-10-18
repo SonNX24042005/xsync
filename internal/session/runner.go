@@ -20,6 +20,7 @@ type Status struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 	LastSuccess time.Time `json:"last_success,omitempty"`
 	LastError   string    `json:"last_error,omitempty"`
+	Progress    *Progress `json:"progress,omitempty"`
 }
 
 func ReadStatus(id string) Status {
@@ -131,7 +132,7 @@ func Run(ctx context.Context, c Config) error {
 		return err
 	}
 	defer t.Close()
-	return runLoop(ctx, c, func(ctx context.Context) (string, error) { return t.Sync(ctx, c, false) }, logger, defaults)
+	return runLoop(ctx, c, func(ctx context.Context) (string, error) { return t.Sync(ctx, refreshSelections(c), false) }, logger, defaults)
 }
 
 func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger, o runOptions) error {
@@ -164,6 +165,21 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 		err    error
 	}
 	finished := make(chan result, 1)
+	updates := make(chan Progress, 1)
+	syncCtx := context.WithValue(ctx, progressKey{}, progressReporter(func(p Progress) {
+		select {
+		case <-updates:
+		default:
+		}
+		updates <- p
+	}))
+	progressTick := time.NewTicker(250 * time.Millisecond)
+	defer progressTick.Stop()
+	progressDirty := false
+	consumeProgress := func(p Progress) {
+		state.Progress = &p
+		progressDirty = true
+	}
 	running, dirty := false, true
 	var firstChange time.Time
 	retry := o.Retry
@@ -183,7 +199,21 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 			if running {
 				<-finished
 			}
+			select {
+			case p := <-updates:
+				consumeProgress(p)
+			default:
+			}
 			return nil
+		case p := <-updates:
+			if running {
+				consumeProgress(p)
+			}
+		case <-progressTick.C:
+			if running && progressDirty {
+				publish("syncing")
+				progressDirty = false
+			}
 		case event, ok := <-w.Events:
 			if !ok {
 				return fmt.Errorf("filesystem watcher closed")
@@ -227,10 +257,21 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 			}
 			running, dirty = true, false
 			firstChange = time.Time{}
+			state.Progress = &Progress{Stage: "connecting", UpdatedAt: time.Now()}
+			progressDirty = false
 			publish("syncing")
-			go func() { out, err := syncNow(ctx); finished <- result{out, err} }()
+			go func() { out, err := syncNow(syncCtx); finished <- result{out, err} }()
 		case result := <-finished:
+			select {
+			case p := <-updates:
+				consumeProgress(p)
+			default:
+			}
 			running = false
+			c = refreshSelections(c)
+			if err := reconcileWatches(w, c); err != nil {
+				logger.Printf("watch: %v", err)
+			}
 			if c.Password != "" {
 				result.output = strings.ReplaceAll(result.output, c.Password, "[redacted]")
 			}
@@ -245,6 +286,13 @@ func runLoop(ctx context.Context, c Config, syncNow syncFunc, logger *log.Logger
 				arm(retry)
 				retry = min(60*time.Second, retry*2)
 			} else {
+				complete := 100
+				if state.Progress == nil {
+					state.Progress = &Progress{}
+				}
+				state.Progress.Stage, state.Progress.Percent = "completed", &complete
+				state.Progress.Estimated, state.Progress.Rate, state.Progress.ETA = false, "", ""
+				state.Progress.UpdatedAt = time.Now()
 				state.LastSuccess, state.LastError = time.Now(), ""
 				retry = o.Retry
 				if strings.TrimSpace(result.output) != "" {
@@ -272,4 +320,14 @@ func (l *rotatingLog) Write(p []byte) (int, error) {
 	}
 	defer f.Close()
 	return f.Write(p)
+}
+
+// Only a completed relocation changes a running worker's selected paths.
+func refreshSelections(c Config) Config {
+	saved, err := Load(c.ID)
+	if err == nil && saved.Host == c.Host && saved.LocalDir == c.LocalDir && saved.RemoteParent == c.RemoteParent {
+		c.Selections = saved.Selections
+		c.SelectionMode = saved.SelectionMode
+	}
+	return c
 }

@@ -1,9 +1,11 @@
 package tui
 
 import (
+	"context"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"strings"
+	"time"
 )
 
 type textModel struct {
@@ -11,11 +13,26 @@ type textModel struct {
 	lines                 []string
 	offset, width, height int
 	horizontal            int
+	load                  func() string
 }
 
-func (m textModel) Init() tea.Cmd { return nil }
+type textTick struct{}
+
+func textTimer() tea.Cmd { return tea.Tick(time.Second, func(time.Time) tea.Msg { return textTick{} }) }
+func (m textModel) Init() tea.Cmd {
+	if m.load != nil {
+		return textTimer()
+	}
+	return nil
+}
 func (m textModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case textTick:
+		if m.load != nil {
+			m.lines = sanitizedLines(m.load())
+			m.offset = min(m.offset, max(0, len(m.lines)-1))
+			return m, textTimer()
+		}
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
@@ -59,6 +76,11 @@ func (m textModel) View() string {
 }
 func ShowText(title, text string) error {
 	_, err := tea.NewProgram(textModel{title: title, lines: sanitizedLines(text), width: 80, height: 24}, tea.WithAltScreen()).Run()
+	return err
+}
+
+func ShowLiveText(ctx context.Context, title string, load func() string) error {
+	_, err := tea.NewProgram(textModel{title: title, lines: sanitizedLines(load()), load: load, width: 80, height: 24}, tea.WithAltScreen(), tea.WithContext(ctx)).Run()
 	return err
 }
 

@@ -29,6 +29,8 @@ type BrowserOptions struct {
 	Mkdir              func(context.Context, string) error
 	Selected           []BrowserSelection
 	Multi              bool
+	AllowEmpty         bool
+	ExcludeRoot        bool
 }
 
 type BrowserSelection struct {
@@ -258,11 +260,15 @@ func (m browserModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "a":
 			if m.options.Multi {
-				m.toggle(m.relative(m.listing.Path), true)
+				if m.options.ExcludeRoot && m.relative(m.listing.Path) == "." {
+					m.message = Text("Chọn các mục con để loại trừ; không loại trừ toàn bộ nguồn.", "Select children to exclude; the entire source cannot be excluded.")
+				} else {
+					m.toggle(m.relative(m.listing.Path), true)
+				}
 			}
 		case "tab", "ctrl+s":
 			if m.options.Multi {
-				if len(m.selected) == 0 {
+				if len(m.selected) == 0 && !m.options.AllowEmpty {
 					m.message = Text("Chọn ít nhất một mục, hoặc nhấn a để chọn cả thư mục.", "Select an item, or press a to select the entire folder.")
 				} else {
 					m.done = true

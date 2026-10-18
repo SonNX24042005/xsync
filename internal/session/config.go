@@ -20,15 +20,21 @@ type Selection struct {
 	Dir  bool   `json:"directory"`
 }
 
+const (
+	SelectionInclude = "include"
+	SelectionExclude = "exclude"
+)
+
 type Config struct {
-	ID           string      `json:"id"`
-	Host         string      `json:"host"`
-	Auth         string      `json:"auth"`
-	Password     string      `json:"password,omitempty"`
-	LocalDir     string      `json:"local_dir"`
-	RemoteParent string      `json:"remote_parent"`
-	Selections   []Selection `json:"selections"`
-	CreatedAt    time.Time   `json:"created_at"`
+	ID            string      `json:"id"`
+	Host          string      `json:"host"`
+	Auth          string      `json:"auth"`
+	Password      string      `json:"password,omitempty"`
+	LocalDir      string      `json:"local_dir"`
+	RemoteParent  string      `json:"remote_parent"`
+	Selections    []Selection `json:"selections"`
+	SelectionMode string      `json:"selection_mode,omitempty"`
+	CreatedAt     time.Time   `json:"created_at"`
 }
 
 var validID = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -61,6 +67,14 @@ func (c Config) Target() string {
 	return path.Join(c.RemoteParent, filepath.Base(c.LocalDir))
 }
 
+// Sessions saved before selection modes use the original inclusion behavior.
+func (c Config) Mode() string {
+	if c.SelectionMode == "" {
+		return SelectionInclude
+	}
+	return c.SelectionMode
+}
+
 func unsafeText(s string) bool { return strings.ContainsAny(s, "\x00\r\n") }
 
 func (c Config) Validate() error {
@@ -82,11 +96,17 @@ func (c Config) Validate() error {
 	if !path.IsAbs(c.RemoteParent) || path.Clean(c.RemoteParent) != c.RemoteParent || unsafeText(c.RemoteParent) {
 		return fmt.Errorf("remote parent must be a clean absolute Unix path")
 	}
-	if len(c.Selections) == 0 {
+	if c.Mode() != SelectionInclude && c.Mode() != SelectionExclude {
+		return fmt.Errorf("selection mode must be include or exclude")
+	}
+	if c.Mode() == SelectionInclude && len(c.Selections) == 0 {
 		return fmt.Errorf("select at least one file or folder")
 	}
 	for _, s := range c.Selections {
 		if s.Path == "." && s.Dir {
+			if c.Mode() == SelectionExclude {
+				return fmt.Errorf("cannot exclude the entire source folder")
+			}
 			continue
 		}
 		if s.Path == "" || s.Path == "." || path.IsAbs(s.Path) || path.Clean(s.Path) != s.Path ||
@@ -196,6 +216,14 @@ func (c Config) Relevant(rel string) bool {
 	if internal := c.storageRelative(); internal != "" && (rel == internal || strings.HasPrefix(rel, internal+"/")) {
 		return false
 	}
+	if c.Mode() == SelectionExclude {
+		for _, s := range c.Selections {
+			if rel == s.Path || strings.HasPrefix(rel, s.Path+"/") {
+				return false
+			}
+		}
+		return true
+	}
 	for _, s := range c.Selections {
 		if rel == "." || s.Path == "." || rel == s.Path || strings.HasPrefix(s.Path, rel+"/") ||
 			(s.Dir && strings.HasPrefix(rel, s.Path+"/")) {
@@ -233,6 +261,14 @@ func (c Config) Filters() []string {
 			rules = append(rules, rule)
 			seen[rule] = true
 		}
+	}
+	if c.Mode() == SelectionExclude {
+		for _, s := range c.Selections {
+			// An exact anchored path excludes the entry and prunes its subtree.
+			// The same rule protects the remote entry from --delete-delay.
+			add("- /" + escapeFilter(s.Path))
+		}
+		return rules
 	}
 	for _, s := range c.Selections {
 		if s.Path == "." {

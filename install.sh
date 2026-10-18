@@ -83,7 +83,7 @@ if [ "${CHOSEN_LANG}" = "en" ]; then
     MSG_HEADER="=== Installing xsync ==="
     MSG_LANG_SAVED="Default language saved: English (en) in ~/.config/xsync/config.json"
     MSG_CHECK_DEPS="Checking system dependencies..."
-    MSG_ALL_DEPS_READY="All dependencies (rsync, sshpass) are ready!"
+    MSG_ALL_DEPS_READY="All dependencies (rsync, sshpass, git) are ready!"
     MSG_CHECK_RELEASES="Checking releases on GitHub Releases..."
     MSG_RELEASE_INSTALLED="Installed binary from GitHub Releases successfully!"
     MSG_BUILD_SUCCESS="Compiled and installed binary successfully!"
@@ -94,7 +94,7 @@ else
     MSG_HEADER="=== Cài đặt công cụ xsync ==="
     MSG_LANG_SAVED="Đã lưu cấu hình ngôn ngữ: Tiếng Việt (vi) tại ~/.config/xsync/config.json"
     MSG_CHECK_DEPS="Kiểm tra các công cụ phụ thuộc hệ thống..."
-    MSG_ALL_DEPS_READY="Tất cả phụ thuộc (rsync, sshpass) đã sẵn sàng!"
+    MSG_ALL_DEPS_READY="Tất cả phụ thuộc (rsync, sshpass, git) đã sẵn sàng!"
     MSG_CHECK_RELEASES="Kiểm tra bản phát hành trên GitHub Releases..."
     MSG_RELEASE_INSTALLED="Đã cài đặt bản nhị phân từ GitHub Releases thành công!"
     MSG_BUILD_SUCCESS="Đã biên dịch và cài đặt binary thành công!"
@@ -131,7 +131,7 @@ else
     info "Phát hiện hệ điều hành: ${OS} (${ARCH})"
 fi
 
-# 2. Tự động kiểm tra và cài đặt các phụ thuộc hệ thống (rsync, sshpass)
+# 2. Tự động kiểm tra và cài đặt các phụ thuộc hệ thống (rsync, sshpass, git)
 echo ""
 info "${MSG_CHECK_DEPS}"
 
@@ -184,8 +184,8 @@ install_darwin_deps() {
             info "Đang tự động cài đặt phụ thuộc qua Homebrew: ${missing[*]}..."
         fi
         for dep in "${missing[@]}"; do
-            if [ "${dep}" = "rsync" ]; then
-                brew install rsync || true
+            if [ "${dep}" = "rsync" ] || [ "${dep}" = "git" ]; then
+                brew install "${dep}" || true
             elif [ "${dep}" = "sshpass" ]; then
                 brew install esolitos/ipa/sshpass || brew install hudochenkov/sshpass/sshpass || true
             fi
@@ -197,6 +197,9 @@ install_darwin_deps() {
 }
 
 MISSING_DEPS=()
+if ! command -v git >/dev/null 2>&1; then
+    MISSING_DEPS+=("git")
+fi
 if ! command -v rsync >/dev/null 2>&1; then
     MISSING_DEPS+=("rsync")
 fi

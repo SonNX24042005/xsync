@@ -126,6 +126,23 @@ if (Get-Command rsync -ErrorAction SilentlyContinue) {
     }
 }
 
+# Git supports private change tracking and rename detection on the local machine.
+if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+    Write-Info "Installing Git for rename detection..."
+    try {
+        if (Get-Command scoop -ErrorAction SilentlyContinue) {
+            scoop install git
+        } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
+            choco install git -y
+        }
+    } catch {
+        Write-Warn "Git installation failed: $_"
+    }
+    if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+        Write-Warn "Git is unavailable. Sync will use rsync without rename optimization."
+    }
+}
+
 # 2. Tao thu muc cai dat
 if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
