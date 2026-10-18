@@ -18,12 +18,16 @@ irm https://raw.githubusercontent.com/SonNX24042005/xsync/main/install.ps1 | iex
 
 Các lệnh cài đặt trên tải binary từ **GitHub Releases mới nhất**, không nhất thiết là commit mới nhất trên `main`. Installer hiển thị phiên bản đã cài. Bản có sẵn trong `bin/` của thư mục hiện tại không được ưu tiên.
 
+Push lên `main` tự động tăng phiên bản patch, ví dụ `v1.1.0` → `v1.1.1`, rồi build cho Linux/macOS/Windows trên amd64/arm64. Release chỉ được công bố và đặt làm mới nhất sau khi đủ cả 6 binary và tệp SHA-256. Trong lúc workflow đang chạy, installer tiếp tục dùng release hoàn chỉnh trước đó. Có thể tạo tag phiên bản riêng nếu cần tăng minor/major.
+
 Hoặc build từ mã nguồn hiện tại:
 
 ```bash
 go build -o bin/xsync ./cmd/xsync
 ./bin/xsync
 ```
+
+Bản tự build từ mã nguồn hiển thị `dev` cùng mã commit; binary phát hành hiển thị phiên bản release.
 
 Chế độ đồng bộ cần OpenSSH và rsync từ 3.1.3 ở cả local và remote. Mật khẩu cần sshpass ở local; SSH key không cần sshpass. Giao diện web được nhúng trong binary, không cần Node.js khi sử dụng.
 

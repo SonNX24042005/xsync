@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 
 	"golang.org/x/term"
 	"xsync/internal/i18n"
@@ -14,7 +15,21 @@ import (
 	"xsync/internal/tui"
 )
 
-const Version = "1.1.0"
+// Release builds set Version through the linker; source builds identify themselves as dev.
+var Version = "dev"
+
+func versionLabel() string {
+	if Version == "dev" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, setting := range info.Settings {
+				if setting.Key == "vcs.revision" && len(setting.Value) >= 7 {
+					return "xsync dev (" + setting.Value[:7] + ")"
+				}
+			}
+		}
+	}
+	return "xsync " + Version
+}
 
 func main() { os.Exit(run(os.Args[1:])) }
 
@@ -81,7 +96,7 @@ func run(args []string) int {
 			fmt.Println(help())
 			return 0
 		case "--version", "-v":
-			fmt.Printf("xsync %s\n", Version)
+			fmt.Println(versionLabel())
 			return 0
 		}
 	}

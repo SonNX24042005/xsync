@@ -2,16 +2,70 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: xsync-release
+  cancel-in-progress: false
 
 jobs:
+  prepare:
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Choose release version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            tag=""
+            mapfile -t existing < <(git tag --points-at "$GITHUB_SHA" --sort=-version:refname)
+            for candidate in "${existing[@]}"; do
+              if [[ "$candidate" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                tag="$candidate"
+                break
+              fi
+            done
+            if [[ -z "$tag" ]]; then
+              tag="v0.1.0"
+              mapfile -t existing < <(git tag --list 'v*' --sort=-version:refname)
+              for candidate in "${existing[@]}"; do
+                if [[ "$candidate" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                  patch=$((10#${BASH_REMATCH[3]} + 1))
+                  tag="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$patch"
+                  break
+                fi
+              done
+            fi
+          fi
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a stable version tag, got: $tag"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "Release $tag from $GITHUB_SHA"
+
   build-release:
+    needs: prepare
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - goos: linux
@@ -26,47 +80,92 @@ jobs:
             goarch: amd64
           - goos: windows
             goarch: arm64
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          go-version-file: 'go.mod'
+          go-version-file: go.mod
           check-latest: true
-
-      - name: Build binary
+      - name: Build and package binary
         env:
           CGO_ENABLED: '0'
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        shell: bash
         run: |
-          expected_version="${GITHUB_REF_NAME#v}"
-          actual_version="$(go run ./cmd/xsync --version)"
-          if [ "$actual_version" != "xsync $expected_version" ]; then
-            echo "Version mismatch: tag=$expected_version, executable=$actual_version"
+          linker_flags="-s -w -X main.Version=$RELEASE_VERSION"
+          actual_version="$(go run -ldflags="$linker_flags" ./cmd/xsync --version)"
+          if [[ "$actual_version" != "xsync $RELEASE_VERSION" ]]; then
+            echo "Version mismatch: expected=$RELEASE_VERSION, executable=$actual_version"
             exit 1
           fi
           mkdir -p dist
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            BINARY_NAME="xsync.exe"
-            OUTPUT_NAME="dist/${BINARY_NAME}"
-            GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd/xsync
-            cd dist
-            zip "xsync_${{ matrix.goos }}_${{ matrix.goarch }}.zip" "${BINARY_NAME}"
-          else
-            BINARY_NAME="xsync"
-            OUTPUT_NAME="dist/${BINARY_NAME}"
-            GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o "${OUTPUT_NAME}" ./cmd/xsync
-            cd dist
-            tar -czvf "xsync_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" "${BINARY_NAME}"
+          binary_name="xsync"
+          if [[ "$TARGET_OS" == windows ]]; then
+            binary_name="xsync.exe"
           fi
-
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v2
+          GOOS="$TARGET_OS" GOARCH="$TARGET_ARCH" go build -ldflags="$linker_flags" -o "dist/$binary_name" ./cmd/xsync
+          cd dist
+          if [[ "$TARGET_OS" == windows ]]; then
+            zip "xsync_${TARGET_OS}_${TARGET_ARCH}.zip" "$binary_name"
+          else
+            tar -czf "xsync_${TARGET_OS}_${TARGET_ARCH}.tar.gz" "$binary_name"
+          fi
+      - uses: actions/upload-artifact@v4
         with:
-          files: |
+          name: xsync-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
             dist/*.tar.gz
             dist/*.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: [prepare, build-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish complete release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          for archive in \
+            xsync_linux_amd64.tar.gz xsync_linux_arm64.tar.gz \
+            xsync_darwin_amd64.tar.gz xsync_darwin_arm64.tar.gz \
+            xsync_windows_amd64.zip xsync_windows_arm64.zip; do
+            test -s "dist/$archive"
+          done
+          (cd dist && sha256sum xsync_*.tar.gz xsync_*.zip > SHA256SUMS)
+          tag_commit="$(git rev-parse --verify --quiet "refs/tags/$RELEASE_TAG^{commit}" || true)"
+          if [[ -n "$tag_commit" && "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "Refusing to move existing tag $RELEASE_TAG"
+            exit 1
+          fi
+          if [[ -z "$tag_commit" ]]; then
+            git tag "$RELEASE_TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$RELEASE_TAG"
+          fi
+          # Token-created tag pushes do not trigger another run; publish here.
+          if gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft > "$RUNNER_TEMP/xsync-release-draft"; then
+            if [[ "$(cat "$RUNNER_TEMP/xsync-release-draft")" == false ]]; then
+              echo "Release $RELEASE_TAG is already published."
+              exit 0
+            fi
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "xsync $RELEASE_VERSION" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
+          echo "Published $RELEASE_TAG from $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"

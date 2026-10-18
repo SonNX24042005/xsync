@@ -97,7 +97,7 @@ func settingsMenu() error {
 				return err
 			}
 		case "about":
-			if err = tui.ShowText("xsync "+Version, help()); err != nil {
+			if err = tui.ShowText(versionLabel(), help()); err != nil {
 				return err
 			}
 		case "back":
